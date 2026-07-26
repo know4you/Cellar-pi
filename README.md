@@ -10,9 +10,11 @@ humidity, graphs, Discord reports, and a simple terminal interface.
 - Logs sensor readings automatically
 - Supports SHT31, SHT35, SHT41, and SHT45 sensors over I2C
 - Generates temperature and humidity graphs
-- Sends optional daily reports through Discord
+- Sends optional Discord reports every 12 or 24 hours
+- Matches each graph to the selected 12-hour or 24-hour report range
 - Keeps Discord failures isolated from the sensor logger
 - Provides the `/uc` User Control interface
+- Scans the I2C bus for connected SHT sensors from Troubleshooting
 - Safely changes sensor and notification settings
 - Validates configuration before applying it
 - Rolls back failed sensor changes and software updates
