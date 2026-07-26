@@ -318,17 +318,18 @@ schedule_status() {
 }
 
 
-test_daily_report() {
+send_graph_now() {
     local output result
     output=$(/usr/bin/mktemp)
-    run_with_elapsed "Test Daily Report" \
-        "Generating the graph and daily report." "$output" \
+    run_with_elapsed "Send Graph Now" \
+        "Generating and sending the latest 24-hour graph." "$output" \
         "$SUDO" "$PYTHON" "$REPORT_TOOL" --test-report
     result=$?
     if [[ "$result" -eq 0 ]]; then
-        message "Test Daily Report" "The full daily report was sent successfully."
+        message "Send Graph Now" \
+            "The graph and daily report were sent to Discord.\n\nThe saved schedule was not changed."
     else
-        show_file "Report Failed - Logger Unaffected" "$output"
+        show_file "Graph Send Failed - Logger Unaffected" "$output"
     fi
     /usr/bin/rm -f "$output"
 }
@@ -345,7 +346,6 @@ schedule_settings() {
             "2" "Disable Daily Report" \
             "3" "Change Report Time" \
             "4" "View Schedule Status" \
-            "5" "Test Daily Report" \
             "0" "Back" \
             3>&1 1>&2 2>&3) || return
         case "$choice" in
@@ -382,7 +382,6 @@ schedule_settings() {
                 fi
                 ;;
             4) schedule_status ;;
-            5) test_daily_report ;;
             0) return ;;
         esac
     done
@@ -400,18 +399,20 @@ notifications_menu() {
         choice=$("$WHIPTAIL" \
             --title "Notifications" \
             --menu "Choose an option:" \
-            18 72 7 \
+            19 72 8 \
             "1" "Discord Settings" \
             "2" "Schedule Settings" \
-            "3" "Test Notification" \
-            "4" "View Notification Status" \
+            "3" "Send Graph Now" \
+            "4" "Test Notification" \
+            "5" "View Notification Status" \
             "0" "Back" \
             3>&1 1>&2 2>&3) || return
         case "$choice" in
             1) discord_settings ;;
             2) schedule_settings ;;
-            3) test_notification ;;
-            4) notification_status ;;
+            3) send_graph_now ;;
+            4) test_notification ;;
+            5) notification_status ;;
             0) return ;;
         esac
     done
