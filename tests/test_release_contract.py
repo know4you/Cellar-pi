@@ -68,6 +68,7 @@ class ReleaseContractTests(unittest.TestCase):
             "set-discord *",
             "remove-discord",
             "set-report-time *",
+            "set-report-frequency *",
             "set-report-enabled *",
             "set-temperature-unit *",
             "show-sanitized",
@@ -82,6 +83,34 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn(
             "pip install --requirement $INSTALL_DIR/requirements.txt",
             script,
+        )
+        self.assertIn(
+            "$INSTALL_USER ALL=(root) NOPASSWD: "
+            "/usr/sbin/i2cdetect -y 1",
+            script,
+        )
+
+    def test_troubleshooting_has_a_read_only_sensor_scan(self) -> None:
+        script = (ROOT / "cellarctl").read_text(encoding="utf-8")
+        self.assertIn('"5" "Scan Connected Sensors"', script)
+        self.assertIn('I2CDETECT="/usr/sbin/i2cdetect"', script)
+        self.assertIn('"$SUDO" "$I2CDETECT" -y 1', script)
+        self.assertIn("Configuration match: YES", script)
+        self.assertIn("Raw I2C scan:", script)
+
+    def test_report_frequency_and_graph_window_move_together(self) -> None:
+        config_script = (ROOT / "cellar_config.py").read_text(encoding="utf-8")
+        report_script = (ROOT / "daily_report.py").read_text(encoding="utf-8")
+        control_script = (ROOT / "cellarctl").read_text(encoding="utf-8")
+        self.assertIn("VALID_REPORT_FREQUENCIES = {12, 24}", config_script)
+        self.assertIn("read_recent_data(window_hours)", report_script)
+        self.assertIn(
+            'f"Cellar-pi - Last {window_hours} Hours"',
+            report_script,
+        )
+        self.assertIn(
+            '"4" "Report Frequency and Graph Range"',
+            control_script,
         )
 
     def test_v1_runtime_uses_only_the_supported_sht_family(self) -> None:

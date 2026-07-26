@@ -19,6 +19,7 @@ VALID_SENSORS = {"SHT31", "SHT35", "SHT41", "SHT45"}
 SHT3X_SENSORS = {"SHT31", "SHT35"}
 SHT4X_SENSORS = {"SHT41", "SHT45"}
 VALID_UNITS = {"fahrenheit", "celsius"}
+VALID_REPORT_FREQUENCIES = {12, 24}
 TIME_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
 
@@ -38,6 +39,7 @@ def default_config() -> configparser.ConfigParser:
         "webhook_url": "",
         "report_enabled": "false",
         "report_time": "19:00",
+        "report_frequency_hours": "24",
     }
     return config
 
@@ -86,6 +88,10 @@ def validate(config: configparser.ConfigParser) -> None:
     if not TIME_PATTERN.fullmatch(report_time):
         raise ValueError("report_time must use 24-hour HH:MM format")
 
+    report_frequency = config.getint("discord", "report_frequency_hours")
+    if report_frequency not in VALID_REPORT_FREQUENCIES:
+        raise ValueError("report_frequency_hours must be 12 or 24")
+
     report_enabled = config.getboolean("discord", "report_enabled")
     webhook = config.get("discord", "webhook_url").strip()
     if webhook and not (
@@ -94,7 +100,7 @@ def validate(config: configparser.ConfigParser) -> None:
     ):
         raise ValueError("Discord webhook URL is not valid")
     if report_enabled and not webhook:
-        raise ValueError("daily reporting requires a configured Discord webhook")
+        raise ValueError("scheduled reporting requires a configured Discord webhook")
 
 
 def backup_config() -> Path | None:
@@ -161,6 +167,7 @@ def configure_all(args: argparse.Namespace) -> Path | None:
     config.remove_option("sensor", "gpio_pin")
     config["sensor"]["i2c_address"] = args.i2c
     config["discord"]["report_time"] = args.report_time
+    config["discord"]["report_frequency_hours"] = str(args.report_frequency)
     config["discord"]["report_enabled"] = str(args.report_enabled).lower()
     if args.webhook != "__KEEP__":
         config["discord"]["webhook_url"] = args.webhook
@@ -180,6 +187,8 @@ def mutate(args: argparse.Namespace) -> Path | None:
         config["discord"]["report_enabled"] = "false"
     elif args.command == "set-report-time":
         config["discord"]["report_time"] = args.time
+    elif args.command == "set-report-frequency":
+        config["discord"]["report_frequency_hours"] = str(args.hours)
     elif args.command == "set-report-enabled":
         if args.enabled == "true" and not config["discord"]["webhook_url"].strip():
             raise ValueError("configure a Discord webhook before enabling reports")
@@ -218,6 +227,12 @@ def build_parser() -> argparse.ArgumentParser:
     configure.add_argument("--unit", required=True, choices=sorted(VALID_UNITS))
     configure.add_argument("--report-time", required=True)
     configure.add_argument(
+        "--report-frequency",
+        required=True,
+        type=int,
+        choices=sorted(VALID_REPORT_FREQUENCIES),
+    )
+    configure.add_argument(
         "--report-enabled", action=argparse.BooleanOptionalAction, default=False
     )
     configure.add_argument("--webhook", default="__KEEP__")
@@ -232,6 +247,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     report_time = subparsers.add_parser("set-report-time")
     report_time.add_argument("time")
+    report_frequency = subparsers.add_parser("set-report-frequency")
+    report_frequency.add_argument(
+        "hours",
+        type=int,
+        choices=sorted(VALID_REPORT_FREQUENCIES),
+    )
     report_enabled = subparsers.add_parser("set-report-enabled")
     report_enabled.add_argument("enabled", choices=("true", "false"))
 

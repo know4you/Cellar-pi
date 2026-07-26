@@ -12,14 +12,13 @@ import configparser
 import json
 import os
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 
 CONFIG_FILE = Path("/etc/cellar-pi/config.ini")
 CSV_FILE = Path("/var/lib/cellar-pi/cellar_readings.csv")
 GRAPH_DIR = Path("/var/lib/cellar-pi/graphs")
-GRAPH_FILE = GRAPH_DIR / "cellar-last-24-hours.png"
 STATE_FILE = Path("/var/lib/cellar-pi/report-state.json")
 
 
@@ -54,7 +53,7 @@ def post_message(url: str, message: str, graph: Path | None = None) -> None:
     response.raise_for_status()
 
 
-def read_recent_data():
+def read_recent_data(window_hours: int):
     import pandas as pd
 
     if not CSV_FILE.exists():
@@ -77,7 +76,7 @@ def read_recent_data():
     data = data.dropna(subset=list(required)).sort_values("timestamp")
     if data.empty:
         raise RuntimeError("No valid sensor readings are available")
-    cutoff = data["timestamp"].max() - pd.Timedelta(hours=24)
+    cutoff = data["timestamp"].max() - pd.Timedelta(hours=window_hours)
     return data[data["timestamp"] >= cutoff].copy()
 
 
@@ -87,7 +86,7 @@ def temperature_values(recent, unit: str):
     return recent["temperature_f"], "deg F"
 
 
-def make_graph(recent, unit: str):
+def make_graph(recent, unit: str, window_hours: int):
     import matplotlib
 
     matplotlib.use("Agg")
@@ -95,6 +94,7 @@ def make_graph(recent, unit: str):
     import matplotlib.pyplot as plt
 
     GRAPH_DIR.mkdir(parents=True, exist_ok=True)
+    graph_file = GRAPH_DIR / f"cellar-last-{window_hours}-hours.png"
     temperatures, suffix = temperature_values(recent, unit)
     figure, temperature_axis = plt.subplots(figsize=(14, 7))
     humidity_axis = temperature_axis.twinx()
@@ -109,7 +109,10 @@ def make_graph(recent, unit: str):
         linewidth=2,
         label="Humidity",
     )
-    temperature_axis.set_title("Cellar-pi - Last 24 Hours", fontweight="bold")
+    temperature_axis.set_title(
+        f"Cellar-pi - Last {window_hours} Hours",
+        fontweight="bold",
+    )
     temperature_axis.set_ylabel(f"Temperature ({suffix})", color="red")
     humidity_axis.set_ylabel("Humidity (%)", color="blue")
     temperature_axis.tick_params(axis="y", colors="red")
@@ -120,12 +123,12 @@ def make_graph(recent, unit: str):
     lines = temperature_axis.lines + humidity_axis.lines
     temperature_axis.legend(lines, [line.get_label() for line in lines], loc="best")
     figure.tight_layout()
-    figure.savefig(GRAPH_FILE, dpi=150)
+    figure.savefig(graph_file, dpi=150)
     plt.close(figure)
-    return GRAPH_FILE, temperatures, suffix
+    return graph_file, temperatures, suffix
 
 
-def save_report_state(report_date: str) -> None:
+def save_report_state(report_slot: str) -> None:
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     file_descriptor, temporary_name = tempfile.mkstemp(
         prefix=".report-state-",
@@ -134,7 +137,7 @@ def save_report_state(report_date: str) -> None:
     )
     try:
         with os.fdopen(file_descriptor, "w", encoding="utf-8") as handle:
-            json.dump({"last_report_date": report_date}, handle)
+            json.dump({"last_report_slot": report_slot}, handle)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary_name, STATE_FILE)
@@ -144,9 +147,14 @@ def save_report_state(report_date: str) -> None:
 
 
 def send_full_report(config: configparser.ConfigParser) -> None:
-    recent = read_recent_data()
+    window_hours = config.getint(
+        "discord",
+        "report_frequency_hours",
+        fallback=24,
+    )
+    recent = read_recent_data(window_hours)
     unit = config.get("general", "temperature_unit", fallback="fahrenheit").lower()
-    graph, temperatures, suffix = make_graph(recent, unit)
+    graph, temperatures, suffix = make_graph(recent, unit, window_hours)
     humidity = recent["humidity_percent"]
     sensor = "unknown"
     if "temperature_humidity_sensor" in recent.columns:
@@ -155,7 +163,7 @@ def send_full_report(config: configparser.ConfigParser) -> None:
         sensor = config.get("sensor", "type")
 
     message = (
-        "**Cellar-pi Daily Report**\n"
+        f"**Cellar-pi {window_hours}-Hour Report**\n"
         f"Temperature: **{temperatures.iloc[-1]:.1f}{suffix}** "
         f"(low {temperatures.min():.1f}, high {temperatures.max():.1f}, "
         f"average {temperatures.mean():.1f})\n"
@@ -167,12 +175,38 @@ def send_full_report(config: configparser.ConfigParser) -> None:
     post_message(webhook_url(config), message, graph)
 
 
+def latest_due_slot(
+    now: datetime,
+    report_time: str,
+    frequency_hours: int,
+) -> datetime | None:
+    hour, minute = (int(part) for part in report_time.split(":", 1))
+    today_start = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    yesterday_start = today_start - timedelta(days=1)
+    candidates = {today_start}
+    if frequency_hours == 12:
+        candidates.add(today_start + timedelta(hours=12))
+        candidates.add(yesterday_start + timedelta(hours=12))
+    due_today = [
+        slot
+        for slot in candidates
+        if slot.date() == now.date() and slot <= now
+    ]
+    return max(due_today) if due_today else None
+
+
 def scheduled_run(config: configparser.ConfigParser) -> None:
     if not config.getboolean("discord", "report_enabled", fallback=False):
         return
     now = datetime.now().astimezone()
     report_time = config.get("discord", "report_time", fallback="19:00")
-    if now.strftime("%H:%M") < report_time:
+    frequency_hours = config.getint(
+        "discord",
+        "report_frequency_hours",
+        fallback=24,
+    )
+    due_slot = latest_due_slot(now, report_time, frequency_hours)
+    if due_slot is None:
         return
     state = {}
     if STATE_FILE.exists():
@@ -180,11 +214,16 @@ def scheduled_run(config: configparser.ConfigParser) -> None:
             state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             state = {}
-    today = now.date().isoformat()
-    if state.get("last_report_date") == today:
+    slot_id = due_slot.isoformat(timespec="minutes")
+    if state.get("last_report_slot") == slot_id:
+        return
+    if (
+        not state.get("last_report_slot")
+        and state.get("last_report_date") == now.date().isoformat()
+    ):
         return
     send_full_report(config)
-    save_report_state(today)
+    save_report_state(slot_id)
 
 
 def main() -> int:

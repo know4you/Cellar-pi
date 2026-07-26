@@ -235,7 +235,7 @@ EOF
 
 /usr/bin/tee /etc/systemd/system/cellar-report.timer >/dev/null <<'EOF'
 [Unit]
-Description=Check the Cellar-pi daily report schedule
+Description=Check the Cellar-pi report schedule
 
 [Timer]
 OnCalendar=*-*-* *:*:00
@@ -255,6 +255,7 @@ $INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_conf
 $INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_config.py set-discord *
 $INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_config.py remove-discord
 $INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_config.py set-report-time *
+$INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_config.py set-report-frequency *
 $INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_config.py set-report-enabled *
 $INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_config.py set-temperature-unit *
 $INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_config.py show-sanitized
@@ -276,6 +277,7 @@ $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl is-active cellar-logger.se
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl is-active --quiet cellar-logger.service
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl is-active cellar-report.timer
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/journalctl -u cellar-logger.service *
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/sbin/i2cdetect -y 1
 EOF
 /usr/bin/chmod 440 "$SUDOERS_FILE"
 /usr/sbin/visudo -cf "$SUDOERS_FILE" >/dev/null ||

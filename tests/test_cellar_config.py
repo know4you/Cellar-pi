@@ -31,7 +31,50 @@ class ConfigTests(unittest.TestCase):
         cellar_config.save_config(cellar_config.default_config())
 
     def test_default_config_is_valid(self) -> None:
-        cellar_config.validate(cellar_config.default_config())
+        config = cellar_config.default_config()
+        cellar_config.validate(config)
+        self.assertEqual(
+            config.getint("discord", "report_frequency_hours"),
+            24,
+        )
+
+    def test_only_12_or_24_hour_report_frequencies_are_valid(self) -> None:
+        for hours in (12, 24):
+            with self.subTest(hours=hours):
+                config = cellar_config.default_config()
+                config["discord"]["report_frequency_hours"] = str(hours)
+                cellar_config.validate(config)
+        config = cellar_config.default_config()
+        config["discord"]["report_frequency_hours"] = "6"
+        with self.assertRaisesRegex(
+            ValueError,
+            "report_frequency_hours must be 12 or 24",
+        ):
+            cellar_config.validate(config)
+
+    def test_report_frequency_change_preserves_other_settings(self) -> None:
+        config = cellar_config.default_config()
+        config["sensor"]["i2c_address"] = "0x45"
+        config["discord"]["webhook_url"] = (
+            "https://discord.com/api/webhooks/example/token"
+        )
+        cellar_config.save_config(config)
+        cellar_config.mutate(
+            argparse.Namespace(
+                command="set-report-frequency",
+                hours=12,
+            )
+        )
+        changed = cellar_config.load_config()
+        self.assertEqual(
+            changed.getint("discord", "report_frequency_hours"),
+            12,
+        )
+        self.assertEqual(changed["sensor"]["i2c_address"], "0x45")
+        self.assertEqual(
+            changed["discord"]["webhook_url"],
+            "https://discord.com/api/webhooks/example/token",
+        )
 
     def test_all_supported_sht_models_validate(self) -> None:
         for sensor, address in (

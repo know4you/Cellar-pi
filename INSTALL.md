@@ -89,7 +89,7 @@ The setup wizard will ask for:
 
 - SHT sensor model and I2C address
 - Fahrenheit or Celsius
-- Daily report time
+- Report time and a 12-hour or 24-hour graph schedule
 - Optional Discord webhook
 
 ## 7. Open User Control
@@ -103,6 +103,17 @@ After installation finishes:
 `/uc` stands for User Control. It lets you view readings, change the sensor,
 configure notifications, check system health, update Cellar-pi, and
 troubleshoot the logger.
+
+If a sensor is not showing up, choose:
+
+```text
+Advanced / Troubleshooting
+-> Scan Connected Sensors
+```
+
+The scan shows whether I2C is ready, whether a supported sensor was found at
+`0x44` or `0x45`, and whether that address matches the saved sensor setting.
+It does not change settings or interrupt logging.
 
 ## Updating later
 

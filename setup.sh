@@ -91,6 +91,19 @@ if ! [[ "$report_time" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
     exit 1
 fi
 
+current_frequency=$(get_value discord report_frequency_hours 24)
+if [[ "$current_frequency" != "12" && "$current_frequency" != "24" ]]; then
+    current_frequency="24"
+fi
+report_frequency=$("$WHIPTAIL" \
+    --title "Report Frequency and Graph Range" \
+    --default-item "$current_frequency" \
+    --menu "Choose how often reports send and how much data each graph shows:" \
+    15 78 4 \
+    "24" "Every 24 hours with a 24-hour graph" \
+    "12" "Every 12 hours with a 12-hour graph" \
+    3>&1 1>&2 2>&3) || exit 0
+
 current_webhook=$(get_value discord webhook_url "")
 webhook_argument="__KEEP__"
 if [[ -n "$current_webhook" ]]; then
@@ -129,9 +142,9 @@ if [[ "$webhook_action" == "remove" ]] ||
    [[ "$webhook_action" == "keep" && -z "$current_webhook" ]]; then
     report_enabled="false"
 elif "$WHIPTAIL" \
-    --title "Daily Report" \
-    --yesno "Enable the daily Discord report at $report_time?" \
-    11 68
+    --title "Scheduled Reports" \
+    --yesno "Enable Discord reports every $report_frequency hours, starting at $report_time?" \
+    12 76
 then
     report_enabled="true"
 else
@@ -148,7 +161,9 @@ fi
 summary="Sensor: $sensor"
 summary+="\nI2C address: $i2c_address"
 summary+="\nTemperature unit: $temperature_unit"
-summary+="\nDaily report: $report_enabled at $report_time"
+summary+="\nReports: $report_enabled every $report_frequency hours"
+summary+="\nGraph range: $report_frequency hours"
+summary+="\nFirst report time: $report_time"
 summary+="\nDiscord: $discord_summary"
 
 "$WHIPTAIL" \
@@ -162,6 +177,7 @@ arguments=(
     --i2c "$i2c_address"
     --unit "$temperature_unit"
     --report-time "$report_time"
+    --report-frequency "$report_frequency"
     --webhook "$webhook_argument"
 )
 if [[ "$report_enabled" == "true" ]]; then
@@ -182,5 +198,5 @@ fi
 
 "$WHIPTAIL" \
     --title "Setup Complete" \
-    --msgbox "Configuration saved and validated.\n\nSensor: $sensor\nTemperature unit: $temperature_unit\nDaily report: $report_enabled at $report_time" \
-    15 70 || true
+    --msgbox "Configuration saved and validated.\n\nSensor: $sensor\nTemperature unit: $temperature_unit\nReports: $report_enabled every $report_frequency hours\nGraph range: $report_frequency hours\nFirst report time: $report_time" \
+    16 72 || true
