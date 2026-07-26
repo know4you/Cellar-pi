@@ -30,6 +30,7 @@ def default_config() -> configparser.ConfigParser:
     }
     config["logging"] = {
         "interval_seconds": "60",
+        "failure_retry_seconds": "5",
         "max_consecutive_failures": "10",
     }
     config["discord"] = {
@@ -71,6 +72,10 @@ def validate(config: configparser.ConfigParser) -> None:
     interval = config.getint("logging", "interval_seconds")
     if interval < 5:
         raise ValueError("interval_seconds cannot be less than 5")
+
+    retry_interval = config.getint("logging", "failure_retry_seconds")
+    if retry_interval < 2:
+        raise ValueError("failure_retry_seconds cannot be less than 2")
 
     failures = config.getint("logging", "max_consecutive_failures")
     if failures < 1:
