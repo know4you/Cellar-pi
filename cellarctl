@@ -26,7 +26,8 @@ message() {
 
 please_wait() {
     "$WHIPTAIL" --title "$1" \
-        --infobox "Please wait while I get that for you..." 9 62
+        --infobox "Please wait while I get that for you...\n\nElapsed time: 0 seconds." \
+        11 62
 }
 
 
@@ -88,8 +89,8 @@ capture_and_show() {
     shift
     local output
     output=$(/usr/bin/mktemp)
-    please_wait "$title"
-    "$@" >"$output" 2>&1 || true
+    run_with_elapsed "$title" \
+        "Please wait while I get that for you." "$output" "$@" || true
     show_file "$title" "$output"
     /usr/bin/rm -f "$output"
 }
@@ -233,6 +234,7 @@ sensor_menu() {
 
 discord_status() {
     local webhook
+    please_wait "Discord Status"
     webhook=$(config_get discord webhook_url)
     if [[ -n "$webhook" ]]; then
         message "Discord Status" "Discord webhook: Configured"
@@ -307,6 +309,7 @@ test_notification() {
 
 schedule_status() {
     local enabled time webhook timer
+    please_wait "Schedule Status"
     enabled=$(config_get discord report_enabled false)
     time=$(config_get discord report_time 19:00)
     webhook=$(config_get discord webhook_url)
@@ -550,9 +553,14 @@ advanced_menu() {
                     --yesno "Reinstall the project Python packages?\n\nYour sudo password may be requested." \
                     12 68
                 then
-                    capture_and_show "Package Repair" \
-                        "$SUDO" "$PYTHON" -m pip install \
-                        --requirement /opt/cellar-pi/requirements.txt
+                    if "$SUDO" -v; then
+                        capture_and_show "Package Repair" \
+                            "$SUDO" "$PYTHON" -m pip install \
+                            --requirement /opt/cellar-pi/requirements.txt
+                    else
+                        message "Package Repair" \
+                            "Sudo authentication failed. Nothing was changed."
+                    fi
                 fi
                 ;;
             9) update_cellar_pi ;;
