@@ -40,7 +40,7 @@ wait_countdown() {
             progress=$(((seconds - remaining) * 100 / seconds))
             echo "XXX"
             echo "$progress"
-            echo -e "$detail\n\nContinuing in $remaining seconds..."
+            echo "$detail Continuing in $remaining seconds..."
             echo "XXX"
             /usr/bin/sleep 1
         done
@@ -66,7 +66,7 @@ run_with_elapsed() {
             ((progress > 95)) && progress=95
             echo "XXX"
             echo "$progress"
-            echo -e "$detail\n\nWorking for $elapsed seconds..."
+            echo "$detail Elapsed time: $elapsed seconds."
             echo "XXX"
             /usr/bin/sleep 1
             ((elapsed++))
