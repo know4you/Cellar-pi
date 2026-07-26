@@ -8,10 +8,12 @@ SYSTEMCTL="/usr/bin/systemctl"
 JOURNALCTL="/usr/bin/journalctl"
 TAIL="/usr/bin/tail"
 SED="/usr/bin/sed"
+WC="/usr/bin/wc"
 PYTHON="/opt/cellar-pi/venv/bin/python"
 CONFIG_TOOL="/opt/cellar-pi/cellar_config.py"
 REPORT_TOOL="/opt/cellar-pi/daily_report.py"
 SETUP="/opt/cellar-pi/setup.sh"
+UPDATE_TOOL="/usr/local/bin/cellar-update"
 CSV="/var/lib/cellar-pi/cellar_readings.csv"
 LOGGER="cellar-logger.service"
 REPORT_TIMER="cellar-report.timer"
@@ -19,6 +21,60 @@ REPORT_TIMER="cellar-report.timer"
 
 message() {
     "$WHIPTAIL" --title "$1" --msgbox "$2" "${3:-12}" "${4:-70}"
+}
+
+
+please_wait() {
+    "$WHIPTAIL" --title "$1" \
+        --infobox "Please wait while I get that for you..." 9 62
+}
+
+
+wait_countdown() {
+    local title="$1"
+    local detail="$2"
+    local seconds="$3"
+    local remaining progress
+    (
+        for ((remaining = seconds; remaining > 0; remaining--)); do
+            progress=$(((seconds - remaining) * 100 / seconds))
+            echo "XXX"
+            echo "$progress"
+            echo -e "$detail\n\nContinuing in $remaining seconds..."
+            echo "XXX"
+            /usr/bin/sleep 1
+        done
+        echo 100
+    ) | "$WHIPTAIL" --title "$title" \
+        --gauge "$detail" 12 70 0
+}
+
+
+run_with_elapsed() {
+    local title="$1"
+    local detail="$2"
+    local output="$3"
+    shift 3
+    local elapsed=0
+    local progress
+
+    "$@" >"$output" 2>&1 &
+    local command_pid=$!
+    (
+        while /usr/bin/kill -0 "$command_pid" 2>/dev/null; do
+            progress=$((elapsed + 5))
+            ((progress > 95)) && progress=95
+            echo "XXX"
+            echo "$progress"
+            echo -e "$detail\n\nWorking for $elapsed seconds..."
+            echo "XXX"
+            /usr/bin/sleep 1
+            ((elapsed++))
+        done
+        echo 100
+    ) | "$WHIPTAIL" --title "$title" \
+        --gauge "$detail" 12 72 0
+    wait "$command_pid"
 }
 
 
@@ -32,6 +88,7 @@ capture_and_show() {
     shift
     local output
     output=$(/usr/bin/mktemp)
+    please_wait "$title"
     "$@" >"$output" 2>&1 || true
     show_file "$title" "$output"
     /usr/bin/rm -f "$output"
@@ -48,6 +105,17 @@ service_is_healthy() {
 }
 
 
+latest_reading() {
+    local latest line_count
+    [[ -s "$CSV" ]] || return 1
+    line_count=$("$WC" -l <"$CSV")
+    ((line_count > 1)) || return 1
+    latest=$("$TAIL" -n 1 "$CSV")
+    [[ "$latest" != timestamp,* ]] || return 1
+    /usr/bin/printf "%s" "$latest"
+}
+
+
 rollback_sensor_config() {
     local backup="$1"
     if [[ -n "$backup" ]]; then
@@ -58,8 +126,10 @@ rollback_sensor_config() {
 
 
 current_reading() {
-    if [[ -s "$CSV" ]]; then
-        message "Current Reading" "$("$TAIL" -n 1 "$CSV")" 12 82
+    local latest
+    please_wait "Current Reading"
+    if latest=$(latest_reading); then
+        message "Current Reading" "$latest" 12 82
     else
         message "Current Reading" "No readings have been recorded yet."
     fi
@@ -67,7 +137,8 @@ current_reading() {
 
 
 recent_readings() {
-    if [[ -s "$CSV" ]]; then
+    please_wait "Recent Readings"
+    if latest_reading >/dev/null; then
         capture_and_show "Recent Readings" "$TAIL" -n 30 "$CSV"
     else
         message "Recent Readings" "No readings have been recorded yet."
@@ -125,7 +196,8 @@ sensor_settings() {
     fi
 
     "$SUDO" "$SYSTEMCTL" restart "$LOGGER"
-    /usr/bin/sleep 4
+    wait_countdown "Sensor Settings" \
+        "Waiting for the logger to test the new sensor configuration." 4
     if service_is_healthy; then
         message "Sensor Updated" \
             "Sensor configuration is valid and the logger restarted successfully."
@@ -219,9 +291,9 @@ discord_settings() {
 test_notification() {
     local output result
     output=$(/usr/bin/mktemp)
-    "$WHIPTAIL" --title "Test Notification" \
-        --infobox "Please wait...\n\nSending a Discord test message." 10 66
-    "$SUDO" "$PYTHON" "$REPORT_TOOL" --test-notification >"$output" 2>&1
+    run_with_elapsed "Test Notification" \
+        "Sending a Discord test message." "$output" \
+        "$SUDO" "$PYTHON" "$REPORT_TOOL" --test-notification
     result=$?
     if [[ "$result" -eq 0 ]]; then
         message "Test Notification" \
@@ -249,20 +321,10 @@ schedule_status() {
 test_daily_report() {
     local output result
     output=$(/usr/bin/mktemp)
-    (
-        echo 10
-        echo "XXX"
-        echo "Please wait..."
-        echo "Generating the graph and daily report."
-        echo "XXX"
-        "$SUDO" "$PYTHON" "$REPORT_TOOL" --test-report >"$output" 2>&1
-        result=$?
-        echo "$result" >/tmp/cellar-report-result
-        echo 100
-    ) | "$WHIPTAIL" --title "Test Daily Report" \
-        --gauge "Please wait..." 11 72 0
-    result=$(/usr/bin/cat /tmp/cellar-report-result 2>/dev/null || echo 1)
-    /usr/bin/rm -f /tmp/cellar-report-result
+    run_with_elapsed "Test Daily Report" \
+        "Generating the graph and daily report." "$output" \
+        "$SUDO" "$PYTHON" "$REPORT_TOOL" --test-report
+    result=$?
     if [[ "$result" -eq 0 ]]; then
         message "Test Daily Report" "The full daily report was sent successfully."
     else
@@ -358,6 +420,7 @@ notifications_menu() {
 
 system_status() {
     local logger timer sensor last webhook enabled time
+    please_wait "System Status"
     logger=$("$SUDO" "$SYSTEMCTL" is-active "$LOGGER" 2>/dev/null || true)
     timer=$("$SUDO" "$SYSTEMCTL" is-active "$REPORT_TIMER" 2>/dev/null || true)
     sensor=$(config_get sensor type unknown)
@@ -365,8 +428,8 @@ system_status() {
     enabled=$(config_get discord report_enabled false)
     time=$(config_get discord report_time 19:00)
     [[ -n "$webhook" ]] && webhook="Configured" || webhook="Not configured"
-    if [[ -s "$CSV" ]]; then
-        last=$("$TAIL" -n 1 "$CSV")
+    if last=$(latest_reading); then
+        :
     else
         last="No readings yet"
     fi
@@ -402,7 +465,8 @@ service_action() {
         --yesno "$action the logger now?" 10 58
     then
         "$SUDO" "$SYSTEMCTL" "${action,,}" "$LOGGER"
-        /usr/bin/sleep 2
+        wait_countdown "$action Logger" \
+            "Waiting for the logger to settle." 2
         if [[ "$action" == "Stop" ]]; then
             if ! service_is_healthy; then
                 message "$action Logger" "Logger stopped successfully."
@@ -419,13 +483,38 @@ service_action() {
 }
 
 
+update_cellar_pi() {
+    local output result
+    if ! "$WHIPTAIL" --title "Update Cellar-pi" \
+        --yesno "Download and install the newest Cellar-pi version?\n\nConfiguration and readings will be preserved. The previous installation is restored if the update fails." \
+        14 74
+    then
+        return
+    fi
+
+    output=$(/usr/bin/mktemp)
+    run_with_elapsed "Update Cellar-pi" \
+        "Downloading, validating, and installing the update." "$output" \
+        "$SUDO" "$UPDATE_TOOL"
+    result=$?
+    if [[ "$result" -eq 0 ]]; then
+        show_file "Update Complete - Reopen /uc" "$output"
+        /usr/bin/rm -f "$output"
+        exit 0
+    else
+        show_file "Update Failed - Previous Version Restored" "$output"
+    fi
+    /usr/bin/rm -f "$output"
+}
+
+
 advanced_menu() {
     while true; do
         local choice backup
         choice=$("$WHIPTAIL" \
             --title "Advanced / Troubleshooting" \
             --menu "Choose an option:" \
-            24 76 12 \
+            25 76 13 \
             "1" "Temperature Units" \
             "2" "View Configuration" \
             "3" "View Logger Status" \
@@ -434,7 +523,8 @@ advanced_menu() {
             "6" "Stop Logger" \
             "7" "Start Logger" \
             "8" "Repair Python Packages" \
-            "9" "Run Full Setup Wizard" \
+            "9" "Update Cellar-pi" \
+            "10" "Run Full Setup Wizard" \
             "0" "Back" \
             3>&1 1>&2 2>&3) || return
         case "$choice" in
@@ -464,7 +554,8 @@ advanced_menu() {
                         --requirement /opt/cellar-pi/requirements.txt
                 fi
                 ;;
-            9)
+            9) update_cellar_pi ;;
+            10)
                 if "$WHIPTAIL" --title "Full Setup Wizard" \
                     --yesno "Run the full setup wizard?\n\nExisting settings are loaded and the webhook is kept unless you explicitly replace or remove it." \
                     14 72
@@ -472,7 +563,8 @@ advanced_menu() {
                     backup=$("$SUDO" "$PYTHON" "$CONFIG_TOOL" backup)
                     if "$SUDO" "$SETUP"; then
                         "$SUDO" "$SYSTEMCTL" restart "$LOGGER"
-                        /usr/bin/sleep 4
+                        wait_countdown "Full Setup Wizard" \
+                            "Waiting for the logger to validate the configuration." 4
                         if service_is_healthy; then
                             message "Full Setup Wizard" \
                                 "Configuration validated and the logger restarted successfully."
