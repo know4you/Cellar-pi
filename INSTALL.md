@@ -48,8 +48,8 @@ Schedule the daily report
 Check system status
 Troubleshoot the logger
 I think you’ll love it. I’ve tried to make the entire project stupid easy to install, configure, and use.
-Thank You
-Thank you for installing Project Cellar-pi.
+   
+7. Thank you for installing Project Cellar-pi.
 This project started because I wanted to move my homelab into my cellar. It was making my bedroom way too hot. What started as a simple temperature monitor slowly turned into this.
 Maybe someday, if the project takes off, I’ll add a coffee link. I don’t know yet.
 For now, I genuinely hope someone enjoys using it. I’ve tried my hardest to make it simple enough that nearly anyone can get it running.
