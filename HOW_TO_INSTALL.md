@@ -32,3 +32,5 @@ python3 -m py_compile cellar_logger.py
   If those commands produce no output, that's a good sign—they passed their syntax checks.
 now lets intall :) 
 sudo bash install.sh
+shouldnt take that long hopefuly 
+thank you for instaling projet cellar-pie this all started do to wanting to move my homelab into my cellar bc it got my bed room to hot hahaha :) 
