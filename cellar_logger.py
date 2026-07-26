@@ -330,6 +330,14 @@ def main() -> int:
         if interval_seconds < 5:
             raise ValueError("Logging interval cannot be less than 5 seconds.")
 
+        failure_retry_seconds = config.getint(
+            "logging",
+            "failure_retry_seconds",
+            fallback=5,
+        )
+        if failure_retry_seconds < 2:
+            raise ValueError("Failure retry interval cannot be less than 2 seconds.")
+
         max_failures = config.getint(
             "logging",
             "max_consecutive_failures",
@@ -356,12 +364,17 @@ def main() -> int:
 
         logging.info("Cellar-pi logger started.")
         logging.info("Logging every %s seconds.", interval_seconds)
+        logging.info(
+            "Failed sensor reads retry every %s seconds.",
+            failure_retry_seconds,
+        )
 
         consecutive_failures = 0
 
         try:
             while RUNNING:
                 loop_started = time.monotonic()
+                reading_succeeded = False
 
                 try:
                     reading = environment_reader.read()
@@ -386,6 +399,7 @@ def main() -> int:
                     )
 
                     consecutive_failures = 0
+                    reading_succeeded = True
 
                     logging.info(
                         "Reading saved: %s",
@@ -419,7 +433,12 @@ def main() -> int:
                     )
 
                 elapsed = time.monotonic() - loop_started
-                sleep_time = max(0.0, interval_seconds - elapsed)
+                next_interval = (
+                    interval_seconds
+                    if reading_succeeded
+                    else failure_retry_seconds
+                )
+                sleep_time = max(0.0, next_interval - elapsed)
 
                 if sleep_time > 0:
                     time.sleep(sleep_time)
@@ -437,3 +456,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
