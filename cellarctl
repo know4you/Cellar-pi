@@ -1,0 +1,513 @@
+#!/usr/bin/env bash
+
+set -u
+
+WHIPTAIL="/usr/bin/whiptail"
+SUDO="/usr/bin/sudo"
+SYSTEMCTL="/usr/bin/systemctl"
+JOURNALCTL="/usr/bin/journalctl"
+TAIL="/usr/bin/tail"
+SED="/usr/bin/sed"
+PYTHON="/opt/cellar-pi/venv/bin/python"
+CONFIG_TOOL="/opt/cellar-pi/cellar_config.py"
+REPORT_TOOL="/opt/cellar-pi/daily_report.py"
+SETUP="/opt/cellar-pi/setup.sh"
+CSV="/var/lib/cellar-pi/cellar_readings.csv"
+LOGGER="cellar-logger.service"
+REPORT_TIMER="cellar-report.timer"
+
+
+message() {
+    "$WHIPTAIL" --title "$1" --msgbox "$2" "${3:-12}" "${4:-70}"
+}
+
+
+show_file() {
+    "$WHIPTAIL" --title "$1" --scrolltext --textbox "$2" 24 90
+}
+
+
+capture_and_show() {
+    local title="$1"
+    shift
+    local output
+    output=$(/usr/bin/mktemp)
+    "$@" >"$output" 2>&1 || true
+    show_file "$title" "$output"
+    /usr/bin/rm -f "$output"
+}
+
+
+config_get() {
+    "$SUDO" "$PYTHON" "$CONFIG_TOOL" get "$1" "$2" --fallback "${3:-}"
+}
+
+
+service_is_healthy() {
+    "$SUDO" "$SYSTEMCTL" is-active --quiet "$LOGGER"
+}
+
+
+rollback_sensor_config() {
+    local backup="$1"
+    if [[ -n "$backup" ]]; then
+        "$SUDO" "$PYTHON" "$CONFIG_TOOL" restore "$backup" >/dev/null 2>&1 || true
+        "$SUDO" "$SYSTEMCTL" restart "$LOGGER" >/dev/null 2>&1 || true
+    fi
+}
+
+
+current_reading() {
+    if [[ -s "$CSV" ]]; then
+        message "Current Reading" "$("$TAIL" -n 1 "$CSV")" 12 82
+    else
+        message "Current Reading" "No readings have been recorded yet."
+    fi
+}
+
+
+recent_readings() {
+    if [[ -s "$CSV" ]]; then
+        capture_and_show "Recent Readings" "$TAIL" -n 30 "$CSV"
+    else
+        message "Recent Readings" "No readings have been recorded yet."
+    fi
+}
+
+
+sensor_settings() {
+    local sensor gpio i2c backup
+    sensor=$("$WHIPTAIL" \
+        --title "Sensor Settings" \
+        --menu "Choose the temperature/humidity sensor:" \
+        15 68 4 \
+        "DHT11" "GPIO temperature and humidity sensor" \
+        "SHT31" "I2C temperature and humidity sensor" \
+        "0" "Back" \
+        3>&1 1>&2 2>&3) || return
+
+    [[ "$sensor" == "0" ]] && return
+    gpio="4"
+    i2c="0x44"
+
+    if [[ "$sensor" == "DHT11" ]]; then
+        gpio=$("$WHIPTAIL" \
+            --title "DHT11 GPIO" \
+            --inputbox "Enter the BCM GPIO number (0-27):" \
+            11 60 "$(config_get sensor gpio_pin 4)" \
+            3>&1 1>&2 2>&3) || return
+        if ! [[ "$gpio" =~ ^[0-9]+$ ]] || ((gpio < 0 || gpio > 27)); then
+            message "Invalid GPIO" "GPIO must be a number from 0 through 27."
+            return
+        fi
+    else
+        i2c=$("$WHIPTAIL" \
+            --title "SHT31 I2C Address" \
+            --inputbox "Enter the I2C address:" \
+            11 60 "$(config_get sensor i2c_address 0x44)" \
+            3>&1 1>&2 2>&3) || return
+        if ! [[ "$i2c" =~ ^0x[0-9A-Fa-f]{2}$ ]]; then
+            message "Invalid Address" "Use a hexadecimal address such as 0x44."
+            return
+        fi
+    fi
+
+    "$WHIPTAIL" \
+        --title "Confirm Sensor Change" \
+        --yesno "Change the sensor to $sensor?\n\nDiscord and report settings will not be changed." \
+        12 68 || return
+
+    backup=$("$SUDO" "$PYTHON" "$CONFIG_TOOL" \
+        set-sensor "$sensor" --gpio "$gpio" --i2c "$i2c" 2>/tmp/cellar-config-error)
+    if [[ $? -ne 0 ]]; then
+        capture_and_show "Sensor Configuration Failed" /usr/bin/cat /tmp/cellar-config-error
+        return
+    fi
+
+    "$SUDO" "$SYSTEMCTL" restart "$LOGGER"
+    /usr/bin/sleep 4
+    if service_is_healthy; then
+        message "Sensor Updated" \
+            "Sensor configuration is valid and the logger restarted successfully."
+    else
+        rollback_sensor_config "$backup"
+        capture_and_show "Sensor Change Rolled Back" \
+            "$SUDO" "$JOURNALCTL" -u "$LOGGER" -n 50 --no-pager
+    fi
+}
+
+
+sensor_menu() {
+    while true; do
+        local choice
+        choice=$("$WHIPTAIL" \
+            --title "Sensor" \
+            --menu "Choose an option:" \
+            17 70 6 \
+            "1" "Current Reading" \
+            "2" "Recent Readings" \
+            "3" "Sensor Settings" \
+            "0" "Back" \
+            3>&1 1>&2 2>&3) || return
+        case "$choice" in
+            1) current_reading ;;
+            2) recent_readings ;;
+            3) sensor_settings ;;
+            0) return ;;
+        esac
+    done
+}
+
+
+discord_status() {
+    local webhook
+    webhook=$(config_get discord webhook_url)
+    if [[ -n "$webhook" ]]; then
+        message "Discord Status" "Discord webhook: Configured"
+    else
+        message "Discord Status" "Discord webhook: Not configured"
+    fi
+}
+
+
+discord_settings() {
+    while true; do
+        local choice webhook
+        choice=$("$WHIPTAIL" \
+            --title "Discord Settings" \
+            --menu "Choose an option:" \
+            17 72 6 \
+            "1" "Add or Replace Webhook" \
+            "2" "Remove Webhook" \
+            "3" "View Discord Status" \
+            "0" "Back" \
+            3>&1 1>&2 2>&3) || return
+        case "$choice" in
+            1)
+                webhook=$("$WHIPTAIL" \
+                    --title "Discord Webhook" \
+                    --passwordbox "Paste the Discord webhook URL:" \
+                    11 78 \
+                    3>&1 1>&2 2>&3) || continue
+                if "$SUDO" "$PYTHON" "$CONFIG_TOOL" set-discord "$webhook" \
+                    >/dev/null 2>/tmp/cellar-config-error
+                then
+                    message "Discord Settings" \
+                        "Webhook saved.\n\nThe logger was not restarted."
+                else
+                    capture_and_show "Invalid Discord Configuration" \
+                        /usr/bin/cat /tmp/cellar-config-error
+                fi
+                ;;
+            2)
+                if "$WHIPTAIL" --title "Remove Webhook" \
+                    --yesno "Remove the Discord webhook and disable daily reports?" \
+                    11 70
+                then
+                    "$SUDO" "$PYTHON" "$CONFIG_TOOL" remove-discord >/dev/null
+                    message "Discord Settings" \
+                        "Webhook removed and daily reports disabled.\n\nLogging was not interrupted."
+                fi
+                ;;
+            3) discord_status ;;
+            0) return ;;
+        esac
+    done
+}
+
+
+test_notification() {
+    local output result
+    output=$(/usr/bin/mktemp)
+    "$WHIPTAIL" --title "Test Notification" \
+        --infobox "Please wait...\n\nSending a Discord test message." 10 66
+    "$SUDO" "$PYTHON" "$REPORT_TOOL" --test-notification >"$output" 2>&1
+    result=$?
+    if [[ "$result" -eq 0 ]]; then
+        message "Test Notification" \
+            "Discord accepted the test notification.\n\nThe logger kept running."
+    else
+        show_file "Notification Failed â€” Logger Unaffected" "$output"
+    fi
+    /usr/bin/rm -f "$output"
+}
+
+
+schedule_status() {
+    local enabled time webhook timer
+    enabled=$(config_get discord report_enabled false)
+    time=$(config_get discord report_time 19:00)
+    webhook=$(config_get discord webhook_url)
+    timer=$("$SUDO" "$SYSTEMCTL" is-active "$REPORT_TIMER" 2>/dev/null || true)
+    [[ -n "$webhook" ]] && webhook="Configured" || webhook="Not configured"
+    message "Schedule Status" \
+        "Daily report: $enabled\nReport time: $time\nDiscord webhook: $webhook\nReport timer: $timer" \
+        14 66
+}
+
+
+test_daily_report() {
+    local output result
+    output=$(/usr/bin/mktemp)
+    (
+        echo 10
+        echo "XXX"
+        echo "Please wait..."
+        echo "Generating the graph and daily report."
+        echo "XXX"
+        "$SUDO" "$PYTHON" "$REPORT_TOOL" --test-report >"$output" 2>&1
+        result=$?
+        echo "$result" >/tmp/cellar-report-result
+        echo 100
+    ) | "$WHIPTAIL" --title "Test Daily Report" \
+        --gauge "Please wait..." 11 72 0
+    result=$(/usr/bin/cat /tmp/cellar-report-result 2>/dev/null || echo 1)
+    /usr/bin/rm -f /tmp/cellar-report-result
+    if [[ "$result" -eq 0 ]]; then
+        message "Test Daily Report" "The full daily report was sent successfully."
+    else
+        show_file "Report Failed â€” Logger Unaffected" "$output"
+    fi
+    /usr/bin/rm -f "$output"
+}
+
+
+schedule_settings() {
+    while true; do
+        local choice report_time
+        choice=$("$WHIPTAIL" \
+            --title "Schedule Settings" \
+            --menu "Choose an option:" \
+            19 72 8 \
+            "1" "Enable Daily Report" \
+            "2" "Disable Daily Report" \
+            "3" "Change Report Time" \
+            "4" "View Schedule Status" \
+            "5" "Test Daily Report" \
+            "0" "Back" \
+            3>&1 1>&2 2>&3) || return
+        case "$choice" in
+            1)
+                if "$SUDO" "$PYTHON" "$CONFIG_TOOL" \
+                    set-report-enabled true >/dev/null 2>/tmp/cellar-config-error
+                then
+                    message "Schedule Settings" "Daily report enabled."
+                else
+                    capture_and_show "Cannot Enable Report" \
+                        /usr/bin/cat /tmp/cellar-config-error
+                fi
+                ;;
+            2)
+                "$SUDO" "$PYTHON" "$CONFIG_TOOL" \
+                    set-report-enabled false >/dev/null
+                message "Schedule Settings" \
+                    "Daily report disabled.\n\nThe saved report time was kept."
+                ;;
+            3)
+                report_time=$("$WHIPTAIL" \
+                    --title "Report Time" \
+                    --inputbox "Enter a 24-hour time (HH:MM):" \
+                    11 62 "$(config_get discord report_time 19:00)" \
+                    3>&1 1>&2 2>&3) || continue
+                if "$SUDO" "$PYTHON" "$CONFIG_TOOL" \
+                    set-report-time "$report_time" >/dev/null 2>/tmp/cellar-config-error
+                then
+                    message "Schedule Settings" \
+                        "Report time changed to $report_time.\n\nReporting was not enabled or disabled."
+                else
+                    capture_and_show "Invalid Report Time" \
+                        /usr/bin/cat /tmp/cellar-config-error
+                fi
+                ;;
+            4) schedule_status ;;
+            5) test_daily_report ;;
+            0) return ;;
+        esac
+    done
+}
+
+
+notification_status() {
+    schedule_status
+}
+
+
+notifications_menu() {
+    while true; do
+        local choice
+        choice=$("$WHIPTAIL" \
+            --title "Notifications" \
+            --menu "Choose an option:" \
+            18 72 7 \
+            "1" "Discord Settings" \
+            "2" "Schedule Settings" \
+            "3" "Test Notification" \
+            "4" "View Notification Status" \
+            "0" "Back" \
+            3>&1 1>&2 2>&3) || return
+        case "$choice" in
+            1) discord_settings ;;
+            2) schedule_settings ;;
+            3) test_notification ;;
+            4) notification_status ;;
+            0) return ;;
+        esac
+    done
+}
+
+
+system_status() {
+    local logger timer sensor last webhook enabled time
+    logger=$("$SUDO" "$SYSTEMCTL" is-active "$LOGGER" 2>/dev/null || true)
+    timer=$("$SUDO" "$SYSTEMCTL" is-active "$REPORT_TIMER" 2>/dev/null || true)
+    sensor=$(config_get sensor type unknown)
+    webhook=$(config_get discord webhook_url)
+    enabled=$(config_get discord report_enabled false)
+    time=$(config_get discord report_time 19:00)
+    [[ -n "$webhook" ]] && webhook="Configured" || webhook="Not configured"
+    if [[ -s "$CSV" ]]; then
+        last=$("$TAIL" -n 1 "$CSV")
+    else
+        last="No readings yet"
+    fi
+    message "System Status" \
+        "Logger: $logger\nSensor: $sensor\nReport timer: $timer\nDiscord: $webhook\nDaily report: $enabled at $time\n\nLast reading:\n$last" \
+        18 84
+}
+
+
+temperature_units() {
+    local unit
+    unit=$("$WHIPTAIL" \
+        --title "Temperature Units" \
+        --menu "Choose the display unit:" \
+        14 62 4 \
+        "fahrenheit" "Fahrenheit (Â°F)" \
+        "celsius" "Celsius (Â°C)" \
+        "0" "Back" \
+        3>&1 1>&2 2>&3) || return
+    [[ "$unit" == "0" ]] && return
+    if "$SUDO" "$PYTHON" "$CONFIG_TOOL" \
+        set-temperature-unit "$unit" >/dev/null
+    then
+        message "Temperature Units" \
+            "Display unit changed to $unit.\n\nThe logger was not restarted."
+    fi
+}
+
+
+service_action() {
+    local action="$1"
+    if "$WHIPTAIL" --title "$action Logger" \
+        --yesno "$action the logger now?" 10 58
+    then
+        "$SUDO" "$SYSTEMCTL" "${action,,}" "$LOGGER"
+        /usr/bin/sleep 2
+        if [[ "$action" == "Stop" ]]; then
+            if ! service_is_healthy; then
+                message "$action Logger" "Logger stopped successfully."
+            else
+                message "$action Logger" "Logger is still running."
+            fi
+        elif service_is_healthy; then
+            message "$action Logger" "Logger is running."
+        else
+            capture_and_show "$action Failed" \
+                "$SUDO" "$JOURNALCTL" -u "$LOGGER" -n 50 --no-pager
+        fi
+    fi
+}
+
+
+advanced_menu() {
+    while true; do
+        local choice backup
+        choice=$("$WHIPTAIL" \
+            --title "Advanced / Troubleshooting" \
+            --menu "Choose an option:" \
+            24 76 12 \
+            "1" "Temperature Units" \
+            "2" "View Configuration" \
+            "3" "View Logger Status" \
+            "4" "View Logger Logs" \
+            "5" "Restart Logger" \
+            "6" "Stop Logger" \
+            "7" "Start Logger" \
+            "8" "Repair Python Packages" \
+            "9" "Run Full Setup Wizard" \
+            "0" "Back" \
+            3>&1 1>&2 2>&3) || return
+        case "$choice" in
+            1) temperature_units ;;
+            2)
+                capture_and_show "Configuration" \
+                    "$SUDO" "$PYTHON" "$CONFIG_TOOL" show-sanitized
+                ;;
+            3)
+                capture_and_show "Logger Status" \
+                    "$SUDO" "$SYSTEMCTL" status "$LOGGER" --no-pager
+                ;;
+            4)
+                capture_and_show "Logger Logs" \
+                    "$SUDO" "$JOURNALCTL" -u "$LOGGER" -n 100 --no-pager
+                ;;
+            5) service_action "Restart" ;;
+            6) service_action "Stop" ;;
+            7) service_action "Start" ;;
+            8)
+                if "$WHIPTAIL" --title "Repair Python Packages" \
+                    --yesno "Reinstall the project Python packages?\n\nYour sudo password may be requested." \
+                    12 68
+                then
+                    capture_and_show "Package Repair" \
+                        "$SUDO" "$PYTHON" -m pip install \
+                        --requirement /opt/cellar-pi/requirements.txt
+                fi
+                ;;
+            9)
+                if "$WHIPTAIL" --title "Full Setup Wizard" \
+                    --yesno "Run the full setup wizard?\n\nExisting settings are loaded and the webhook is kept unless you explicitly replace or remove it." \
+                    14 72
+                then
+                    backup=$("$SUDO" "$PYTHON" "$CONFIG_TOOL" backup)
+                    if "$SUDO" "$SETUP"; then
+                        "$SUDO" "$SYSTEMCTL" restart "$LOGGER"
+                        /usr/bin/sleep 4
+                        if service_is_healthy; then
+                            message "Full Setup Wizard" \
+                                "Configuration validated and the logger restarted successfully."
+                        else
+                            rollback_sensor_config "$backup"
+                            capture_and_show "Setup Rolled Back" \
+                                "$SUDO" "$JOURNALCTL" -u "$LOGGER" -n 50 --no-pager
+                        fi
+                    fi
+                fi
+                ;;
+            0) return ;;
+        esac
+    done
+}
+
+
+while true; do
+    choice=$("$WHIPTAIL" \
+        --title "Cellar-pi User Control" \
+        --menu "Choose a section:" \
+        18 72 7 \
+        "1" "Sensor" \
+        "2" "Notifications" \
+        "3" "System Status" \
+        "4" "Advanced / Troubleshooting" \
+        "0" "Exit" \
+        3>&1 1>&2 2>&3) || exit 0
+
+    case "$choice" in
+        1) sensor_menu ;;
+        2) notifications_menu ;;
+        3) system_status ;;
+        4) advanced_menu ;;
+        0) exit 0 ;;
+    esac
+done
+
