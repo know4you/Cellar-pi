@@ -10,6 +10,8 @@ JOURNALCTL="/usr/bin/journalctl"
 TAIL="/usr/bin/tail"
 SED="/usr/bin/sed"
 WC="/usr/bin/wc"
+GREP="/usr/bin/grep"
+I2CDETECT="/usr/sbin/i2cdetect"
 PYTHON="/opt/cellar-pi/venv/bin/python"
 CONFIG_TOOL="/opt/cellar-pi/cellar_config.py"
 LOGGER_TOOL="/opt/cellar-pi/cellar_logger.py"
@@ -125,6 +127,82 @@ capture_and_show() {
         "Please wait while I get that for you." "$output" "$@" || true
     show_file "$title" "$output"
     /usr/bin/rm -f "$output"
+}
+
+
+sensor_hardware_check() {
+    local scan configured_sensor configured_address
+    local found_44="no"
+    local found_45="no"
+
+    configured_sensor=$(config_get sensor type unknown)
+    configured_address=$(config_get sensor i2c_address unknown)
+
+    echo "Cellar-pi sensor hardware check"
+    echo
+    echo "Configured sensor: $configured_sensor"
+    echo "Configured address: $configured_address"
+    echo
+
+    if [[ ! -e /dev/i2c-1 ]]; then
+        echo "I2C bus: NOT READY"
+        echo
+        echo "The Pi cannot see /dev/i2c-1 yet."
+        echo "Run Update Cellar-pi, then reboot the Pi and check again."
+        return 1
+    fi
+
+    echo "I2C bus: ready"
+    echo
+
+    if ! scan=$("$SUDO" "$I2CDETECT" -y 1 2>&1); then
+        echo "The I2C scan failed:"
+        echo "$scan"
+        return 1
+    fi
+
+    if "$GREP" -Eq '(^|[[:space:]])44([[:space:]]|$)' <<<"$scan"; then
+        found_44="yes"
+    fi
+    if "$GREP" -Eq '(^|[[:space:]])45([[:space:]]|$)' <<<"$scan"; then
+        found_45="yes"
+    fi
+
+    echo "Supported SHT addresses found:"
+    if [[ "$found_44" == "yes" ]]; then
+        echo "  0x44 - SHT31, SHT35, SHT41, or SHT45"
+    fi
+    if [[ "$found_45" == "yes" ]]; then
+        echo "  0x45 - SHT31 or SHT35"
+    fi
+    if [[ "$found_44" == "no" && "$found_45" == "no" ]]; then
+        echo "  None"
+    fi
+    echo
+
+    case "$configured_address" in
+        0x44)
+            if [[ "$found_44" == "yes" ]]; then
+                echo "Configuration match: YES"
+            else
+                echo "Configuration match: NO - nothing was detected at 0x44"
+            fi
+            ;;
+        0x45)
+            if [[ "$found_45" == "yes" ]]; then
+                echo "Configuration match: YES"
+            else
+                echo "Configuration match: NO - nothing was detected at 0x45"
+            fi
+            ;;
+        *)
+            echo "Configuration match: UNKNOWN"
+            ;;
+    esac
+
+    echo
+    echo "Raw I2C scan:"
+    echo "$scan"
 }
 
 
@@ -312,12 +390,12 @@ discord_settings() {
                 ;;
             2)
                 if "$WHIPTAIL" --title "Remove Webhook" \
-                    --yesno "Remove the Discord webhook and disable daily reports?" \
+                    --yesno "Remove the Discord webhook and disable scheduled reports?" \
                     11 70
                 then
                     "$SUDO" "$PYTHON" "$CONFIG_TOOL" remove-discord >/dev/null
                     message "Discord Settings" \
-                        "Webhook removed and daily reports disabled.\n\nLogging was not interrupted."
+                        "Webhook removed and scheduled reports disabled.\n\nLogging was not interrupted."
                 fi
                 ;;
             3) discord_status ;;
@@ -350,16 +428,17 @@ test_notification() {
 
 
 schedule_status() {
-    local enabled time webhook timer
+    local enabled time frequency webhook timer
     please_wait "Schedule Status"
     enabled=$(config_get discord report_enabled false)
     time=$(config_get discord report_time 19:00)
+    frequency=$(config_get discord report_frequency_hours 24)
     webhook=$(config_get discord webhook_url)
     timer=$("$SUDO" "$SYSTEMCTL" is-active "$REPORT_TIMER" 2>/dev/null || true)
     [[ -n "$webhook" ]] && webhook="Configured" || webhook="Not configured"
     message "Schedule Status" \
-        "Daily report: $enabled\nReport time: $time\nDiscord webhook: $webhook\nReport timer: $timer" \
-        14 66
+        "Reports enabled: $enabled\nFrequency and graph range: $frequency hours\nFirst report time: $time\nDiscord webhook: $webhook\nReport timer: $timer" \
+        15 72
 }
 
 
@@ -368,7 +447,7 @@ send_graph_now() {
     output=$(/usr/bin/mktemp)
     logger_before=$("$SUDO" "$SYSTEMCTL" is-active "$LOGGER" 2>/dev/null || true)
     run_with_elapsed "Send Graph Now" \
-        "Generating and sending the latest 24-hour graph." "$output" \
+        "Generating and sending the selected report graph." "$output" \
         "$SUDO" "$PYTHON" "$REPORT_TOOL" --test-report
     result=$?
     logger_after=$("$SUDO" "$SYSTEMCTL" is-active "$LOGGER" 2>/dev/null || true)
@@ -377,7 +456,7 @@ send_graph_now() {
         "$logger_before" "$logger_after" >>"$output"
     if [[ "$result" -eq 0 ]]; then
         message "Send Graph Now" \
-            "The graph and daily report were sent to Discord.\n\nThe saved schedule was not changed.\nLogger before: $logger_before\nLogger after: $logger_after"
+            "The selected report graph was sent to Discord.\n\nThe saved schedule was not changed.\nLogger before: $logger_before\nLogger after: $logger_after"
     else
         show_file "Graph Send Failed - Logger Unaffected" "$output"
     fi
@@ -387,15 +466,16 @@ send_graph_now() {
 
 schedule_settings() {
     while true; do
-        local choice report_time
+        local choice report_time report_frequency
         choice=$("$WHIPTAIL" \
             --title "Schedule Settings" \
             --menu "Choose an option:" \
             19 72 8 \
-            "1" "Enable Daily Report" \
-            "2" "Disable Daily Report" \
+            "1" "Enable Reports" \
+            "2" "Disable Reports" \
             "3" "Change Report Time" \
-            "4" "View Schedule Status" \
+            "4" "Report Frequency and Graph Range" \
+            "5" "View Schedule Status" \
             "0" "Back" \
             3>&1 1>&2 2>&3) || return
         case "$choice" in
@@ -403,7 +483,7 @@ schedule_settings() {
                 if "$SUDO" "$PYTHON" "$CONFIG_TOOL" \
                     set-report-enabled true >/dev/null 2>/tmp/cellar-config-error
                 then
-                    message "Schedule Settings" "Daily report enabled."
+                    message "Schedule Settings" "Scheduled reports enabled."
                 else
                     capture_and_show "Cannot Enable Report" \
                         /usr/bin/cat /tmp/cellar-config-error
@@ -413,7 +493,7 @@ schedule_settings() {
                 "$SUDO" "$PYTHON" "$CONFIG_TOOL" \
                     set-report-enabled false >/dev/null
                 message "Schedule Settings" \
-                    "Daily report disabled.\n\nThe saved report time was kept."
+                    "Reports disabled.\n\nThe saved report time and frequency were kept."
                 ;;
             3)
                 report_time=$("$WHIPTAIL" \
@@ -431,7 +511,27 @@ schedule_settings() {
                         /usr/bin/cat /tmp/cellar-config-error
                 fi
                 ;;
-            4) schedule_status ;;
+            4)
+                report_frequency=$("$WHIPTAIL" \
+                    --title "Report Frequency and Graph Range" \
+                    --default-item "$(config_get discord report_frequency_hours 24)" \
+                    --menu "Choose how often reports send and how much data each graph shows:" \
+                    15 78 4 \
+                    "24" "Every 24 hours with a 24-hour graph" \
+                    "12" "Every 12 hours with a 12-hour graph" \
+                    3>&1 1>&2 2>&3) || continue
+                if "$SUDO" "$PYTHON" "$CONFIG_TOOL" \
+                    set-report-frequency "$report_frequency" \
+                    >/dev/null 2>/tmp/cellar-config-error
+                then
+                    message "Schedule Settings" \
+                        "Reports will send every $report_frequency hours with a $report_frequency-hour graph.\n\nThe first report time stays unchanged."
+                else
+                    capture_and_show "Invalid Report Frequency" \
+                        /usr/bin/cat /tmp/cellar-config-error
+                fi
+                ;;
+            5) schedule_status ;;
             0) return ;;
         esac
     done
@@ -470,7 +570,7 @@ notifications_menu() {
 
 
 system_status() {
-    local logger timer sensor sensor_health last webhook enabled time
+    local logger timer sensor sensor_health last webhook enabled time frequency
     please_wait "System Status"
     logger=$("$SUDO" "$SYSTEMCTL" is-active "$LOGGER" 2>/dev/null || true)
     timer=$("$SUDO" "$SYSTEMCTL" is-active "$REPORT_TIMER" 2>/dev/null || true)
@@ -482,6 +582,7 @@ system_status() {
     webhook=$(config_get discord webhook_url)
     enabled=$(config_get discord report_enabled false)
     time=$(config_get discord report_time 19:00)
+    frequency=$(config_get discord report_frequency_hours 24)
     [[ -n "$webhook" ]] && webhook="Configured" || webhook="Not configured"
     if last=$(
         "$SUDO" "$PYTHON" "$LOGGER_TOOL" --show-latest 2>/dev/null
@@ -491,7 +592,7 @@ system_status() {
         last="No readings yet"
     fi
     message "System Status" \
-        "Logger: $logger\nSensor: $sensor\n$sensor_health\nReport timer: $timer\nDiscord: $webhook\nDaily report: $enabled at $time\n\nLast reading:\n$last" \
+        "Logger: $logger\nSensor: $sensor\n$sensor_health\nReport timer: $timer\nDiscord: $webhook\nReports: $enabled every $frequency hours\nGraph range: $frequency hours\nFirst report time: $time\n\nLast reading:\n$last" \
         22 84
 }
 
@@ -580,12 +681,13 @@ advanced_menu() {
             "2" "View Configuration" \
             "3" "View Logger Status" \
             "4" "View Logger Logs" \
-            "5" "Restart Logger" \
-            "6" "Stop Logger" \
-            "7" "Start Logger" \
-            "8" "Repair Python Packages" \
-            "9" "Update Cellar-pi" \
-            "10" "Run Full Setup Wizard" \
+            "5" "Scan Connected Sensors" \
+            "6" "Restart Logger" \
+            "7" "Stop Logger" \
+            "8" "Start Logger" \
+            "9" "Repair Python Packages" \
+            "10" "Update Cellar-pi" \
+            "11" "Run Full Setup Wizard" \
             "0" "Back" \
             3>&1 1>&2 2>&3) || return
         case "$choice" in
@@ -602,10 +704,14 @@ advanced_menu() {
                 capture_and_show "Logger Logs" \
                     "$SUDO" "$JOURNALCTL" -u "$LOGGER" -n 100 --no-pager
                 ;;
-            5) service_action "Restart" ;;
-            6) service_action "Stop" ;;
-            7) service_action "Start" ;;
-            8)
+            5)
+                capture_and_show "Scan Connected Sensors" \
+                    sensor_hardware_check
+                ;;
+            6) service_action "Restart" ;;
+            7) service_action "Stop" ;;
+            8) service_action "Start" ;;
+            9)
                 if "$WHIPTAIL" --title "Repair Python Packages" \
                     --yesno "Reinstall the project Python packages?\n\nOnly the exact Cellar-pi repair command is allowed." \
                     12 68
@@ -615,8 +721,8 @@ advanced_menu() {
                         --requirement /opt/cellar-pi/requirements.txt
                 fi
                 ;;
-            9) update_cellar_pi ;;
-            10)
+            10) update_cellar_pi ;;
+            11)
                 if "$WHIPTAIL" --title "Full Setup Wizard" \
                     --yesno "Run the full setup wizard?\n\nExisting settings are loaded and the webhook is kept unless you explicitly replace or remove it." \
                     14 72
