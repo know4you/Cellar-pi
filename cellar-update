@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+REPO_URL="https://github.com/know4you/Cellar-pi.git"
+INSTALL_DIR="/opt/cellar-pi"
+TEMP_DIR=""
+BACKUP_DIR=""
+LOGGER_WAS_ACTIVE="false"
+TIMER_WAS_ACTIVE="false"
+
+
+cleanup() {
+    if [[ -n "${TEMP_DIR:-}" && -d "$TEMP_DIR" ]]; then
+        /usr/bin/rm -rf -- "$TEMP_DIR"
+    fi
+}
+
+
+restore_file() {
+    local backup_name="$1"
+    local destination="$2"
+    if [[ -e "$BACKUP_DIR/$backup_name" ]]; then
+        /usr/bin/cp -a "$BACKUP_DIR/$backup_name" "$destination"
+    fi
+}
+
+
+rollback() {
+    local exit_code="$1"
+    trap - ERR
+    echo
+    echo "Update failed. Restoring the previous Cellar-pi installation..."
+
+    if [[ -d "$BACKUP_DIR/install-dir" ]]; then
+        /usr/bin/rm -rf -- "$INSTALL_DIR"
+        /usr/bin/cp -a "$BACKUP_DIR/install-dir" "$INSTALL_DIR"
+    fi
+
+    restore_file "cellarctl" "/usr/local/bin/cellarctl"
+    restore_file "cellar-update" "/usr/local/bin/cellar-update"
+    restore_file "cellar-logger.service" \
+        "/etc/systemd/system/cellar-logger.service"
+    restore_file "cellar-report.service" \
+        "/etc/systemd/system/cellar-report.service"
+    restore_file "cellar-report.timer" \
+        "/etc/systemd/system/cellar-report.timer"
+    restore_file "cellar-pi-sudoers" "/etc/sudoers.d/cellar-pi"
+
+    /usr/bin/ln -sfn /usr/local/bin/cellarctl /uc
+    /usr/bin/systemctl daemon-reload
+    if [[ "$LOGGER_WAS_ACTIVE" == "true" ]]; then
+        /usr/bin/systemctl restart cellar-logger.service || true
+    fi
+    if [[ "$TIMER_WAS_ACTIVE" == "true" ]]; then
+        /usr/bin/systemctl restart cellar-report.timer || true
+    fi
+
+    echo "The previous installation was restored."
+    exit "$exit_code"
+}
+
+
+if [[ $EUID -ne 0 ]]; then
+    echo "Run this updater through /uc or with sudo."
+    exit 1
+fi
+
+trap cleanup EXIT
+trap 'rollback $?' ERR
+
+if /usr/bin/systemctl is-active --quiet cellar-logger.service; then
+    LOGGER_WAS_ACTIVE="true"
+fi
+if /usr/bin/systemctl is-active --quiet cellar-report.timer; then
+    TIMER_WAS_ACTIVE="true"
+fi
+
+TEMP_DIR=$(/usr/bin/mktemp -d)
+BACKUP_DIR="$TEMP_DIR/backup"
+/usr/bin/mkdir -p "$BACKUP_DIR"
+
+if [[ -d "$INSTALL_DIR" ]]; then
+    /usr/bin/cp -a "$INSTALL_DIR" "$BACKUP_DIR/install-dir"
+fi
+[[ ! -e /usr/local/bin/cellarctl ]] ||
+    /usr/bin/cp -a /usr/local/bin/cellarctl "$BACKUP_DIR/cellarctl"
+[[ ! -e /usr/local/bin/cellar-update ]] ||
+    /usr/bin/cp -a /usr/local/bin/cellar-update "$BACKUP_DIR/cellar-update"
+[[ ! -e /etc/systemd/system/cellar-logger.service ]] ||
+    /usr/bin/cp -a /etc/systemd/system/cellar-logger.service \
+        "$BACKUP_DIR/cellar-logger.service"
+[[ ! -e /etc/systemd/system/cellar-report.service ]] ||
+    /usr/bin/cp -a /etc/systemd/system/cellar-report.service \
+        "$BACKUP_DIR/cellar-report.service"
+[[ ! -e /etc/systemd/system/cellar-report.timer ]] ||
+    /usr/bin/cp -a /etc/systemd/system/cellar-report.timer \
+        "$BACKUP_DIR/cellar-report.timer"
+[[ ! -e /etc/sudoers.d/cellar-pi ]] ||
+    /usr/bin/cp -a /etc/sudoers.d/cellar-pi \
+        "$BACKUP_DIR/cellar-pi-sudoers"
+
+echo "Downloading the latest Cellar-pi release..."
+/usr/bin/git clone --depth 1 "$REPO_URL" "$TEMP_DIR/repository"
+
+echo "Checking the downloaded update..."
+/usr/bin/bash -n "$TEMP_DIR/repository/install.sh"
+/usr/bin/bash -n "$TEMP_DIR/repository/setup.sh"
+/usr/bin/bash -n "$TEMP_DIR/repository/cellarctl"
+/usr/bin/bash -n "$TEMP_DIR/repository/cellar-update"
+/usr/bin/python3 -m py_compile \
+    "$TEMP_DIR/repository/cellar_logger.py" \
+    "$TEMP_DIR/repository/cellar_config.py" \
+    "$TEMP_DIR/repository/daily_report.py"
+
+echo "Installing the update..."
+/usr/bin/bash "$TEMP_DIR/repository/install.sh" --upgrade
+
+if [[ "$LOGGER_WAS_ACTIVE" == "true" ]] &&
+   ! /usr/bin/systemctl is-active --quiet cellar-logger.service; then
+    echo "The logger did not recover after the update." >&2
+    false
+fi
+if ! /usr/bin/systemctl is-active --quiet cellar-report.timer; then
+    echo "The report timer did not recover after the update." >&2
+    false
+fi
+/usr/sbin/visudo -cf /etc/sudoers.d/cellar-pi >/dev/null
+
+trap - ERR
+echo
+echo "Cellar-pi is up to date."
+echo "Configuration and readings were preserved."
+
