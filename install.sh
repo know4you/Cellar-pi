@@ -11,6 +11,7 @@ LOG_DIR="/var/log/cellar-pi"
 VENV_DIR="$INSTALL_DIR/venv"
 SUDOERS_FILE="/etc/sudoers.d/cellar-pi"
 TEMP_DIR=""
+MODE="${1:-install}"
 
 
 cleanup() {
@@ -26,6 +27,11 @@ fail() {
     echo
     exit 1
 }
+
+
+if [[ "$MODE" != "install" && "$MODE" != "--upgrade" ]]; then
+    fail "Unknown installer mode: $MODE"
+fi
 
 
 trap cleanup EXIT
@@ -89,6 +95,7 @@ required_files=(
     cellar_config.py
     daily_report.py
     cellarctl
+    cellar-update
     setup.sh
     requirements.txt
 )
@@ -126,6 +133,8 @@ echo "[6/12] Installing project files..."
     "$INSTALL_DIR/setup.sh"
 /usr/bin/install -m 755 "$TEMP_DIR/repository/cellarctl" \
     /usr/local/bin/cellarctl
+/usr/bin/install -m 755 "$TEMP_DIR/repository/cellar-update" \
+    /usr/local/bin/cellar-update
 /usr/bin/install -m 644 "$TEMP_DIR/repository/requirements.txt" \
     "$INSTALL_DIR/requirements.txt"
 /usr/bin/ln -sfn /usr/local/bin/cellarctl /uc
@@ -190,6 +199,7 @@ echo "[9/12] Installing narrow /uc sudo permissions..."
 $INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_config.py *
 $INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/daily_report.py --test-notification
 $INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/daily_report.py --test-report
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/local/bin/cellar-update
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl start cellar-logger.service
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl stop cellar-logger.service
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart cellar-logger.service
@@ -204,7 +214,11 @@ EOF
     fail "The Cellar-pi sudoers file did not validate."
 
 echo "[10/12] Running initial setup..."
-"$INSTALL_DIR/setup.sh"
+if [[ "$MODE" == "--upgrade" && -s "$CONFIG_DIR/config.ini" ]]; then
+    echo "Keeping the existing Cellar-pi configuration."
+else
+    "$INSTALL_DIR/setup.sh"
+fi
 "$VENV_DIR/bin/python" "$INSTALL_DIR/cellar_config.py" validate >/dev/null
 
 echo "[11/12] Enabling services..."
