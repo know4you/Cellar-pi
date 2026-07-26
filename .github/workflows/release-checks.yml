@@ -1,0 +1,35 @@
+name: Release checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Cellar-pi
+        uses: actions/checkout@v4
+
+      - name: Reject Windows carriage returns
+        shell: bash
+        run: |
+          if grep -rIl $'\r' \
+            install.sh setup.sh cellarctl cellar-update \
+            cellar_logger.py cellar_config.py daily_report.py \
+            requirements.txt
+          then
+            echo "Runtime files must use LF line endings."
+            exit 1
+          fi
+
+      - name: Validate shell syntax
+        shell: bash
+        run: |
+          bash -n install.sh setup.sh cellarctl cellar-update
+
+      - name: Validate Python and run unit tests
+        run: |
+          python3 -m py_compile \
+            cellar_logger.py cellar_config.py daily_report.py
+          python3 -m unittest discover -s tests -v

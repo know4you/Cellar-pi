@@ -30,47 +30,42 @@ get_value() {
 
 "$WHIPTAIL" \
     --title "Cellar-pi Setup" \
-    --msgbox "This wizard configures the initial sensor, units, and Discord reporting.\n\nUse /uc later to change one setting without rerunning everything." \
+    --msgbox "Cellar-pi V1 supports SHT31, SHT35, SHT41, and SHT45 temperature and humidity sensors.\n\nThis wizard configures the sensor, units, and optional Discord reporting." \
     14 72 || exit 0
 
-current_sensor=$(get_value sensor type DHT11)
+current_sensor=$(get_value sensor type SHT31)
+if [[ ! "$current_sensor" =~ ^SHT(31|35|41|45)$ ]]; then
+    current_sensor="SHT31"
+fi
 sensor=$("$WHIPTAIL" \
-    --title "Choose Sensor" \
+    --title "Choose SHT Sensor" \
     --default-item "$current_sensor" \
     --menu "Which sensor are you using?" \
-    16 70 5 \
-    "DHT11" "Temperature and humidity using GPIO" \
-    "SHT31" "Temperature and humidity using I2C" \
+    17 70 6 \
+    "SHT31" "SHT31 and SHT31-D" \
+    "SHT35" "Higher-accuracy SHT3x family" \
+    "SHT41" "Higher-accuracy SHT4x family" \
+    "SHT45" "Highest-accuracy SHT4x family" \
     3>&1 1>&2 2>&3) || exit 0
 
-gpio_pin=$(get_value sensor gpio_pin 4)
 i2c_address=$(get_value sensor i2c_address 0x44)
-
-if [[ "$sensor" == "DHT11" ]]; then
-    gpio_pin=$("$WHIPTAIL" \
-        --title "DHT11 GPIO Pin" \
-        --inputbox "Enter the BCM GPIO number (0-27):" \
-        11 62 "$gpio_pin" \
-        3>&1 1>&2 2>&3) || exit 0
-    if ! [[ "$gpio_pin" =~ ^[0-9]+$ ]] || ((gpio_pin < 0 || gpio_pin > 27)); then
-        "$WHIPTAIL" --title "Invalid GPIO" \
-            --msgbox "GPIO must be a number from 0 through 27." 10 58
-        exit 1
+if [[ "$sensor" == "SHT31" || "$sensor" == "SHT35" ]]; then
+    if [[ "$i2c_address" != "0x44" && "$i2c_address" != "0x45" ]]; then
+        i2c_address="0x44"
     fi
-else
     i2c_address=$("$WHIPTAIL" \
-        --title "SHT31 I2C Address" \
-        --inputbox "Enter the I2C address:" \
-        11 62 "$i2c_address" \
+        --title "$sensor I2C Address" \
+        --default-item "$i2c_address" \
+        --menu "Choose the sensor address:" \
+        14 62 4 \
+        "0x44" "Default address" \
+        "0x45" "Alternate address" \
         3>&1 1>&2 2>&3) || exit 0
-    if ! [[ "$i2c_address" =~ ^0x[0-9A-Fa-f]{2}$ ]]; then
-        "$WHIPTAIL" --title "Invalid Address" \
-            --msgbox "Use a hexadecimal address such as 0x44." 10 58
-        exit 1
-    fi
-    if [[ -x /usr/bin/raspi-config ]]; then
-        /usr/bin/raspi-config nonint do_i2c 0
-    fi
+else
+    i2c_address="0x44"
+fi
+if [[ -x /usr/bin/raspi-config ]]; then
+    /usr/bin/raspi-config nonint do_i2c 0
 fi
 
 current_unit=$(get_value general temperature_unit fahrenheit)
@@ -151,11 +146,7 @@ elif [[ -n "$webhook_argument" ]]; then
 fi
 
 summary="Sensor: $sensor"
-if [[ "$sensor" == "DHT11" ]]; then
-    summary+="\nGPIO pin: $gpio_pin"
-else
-    summary+="\nI2C address: $i2c_address"
-fi
+summary+="\nI2C address: $i2c_address"
 summary+="\nTemperature unit: $temperature_unit"
 summary+="\nDaily report: $report_enabled at $report_time"
 summary+="\nDiscord: $discord_summary"
@@ -168,7 +159,6 @@ summary+="\nDiscord: $discord_summary"
 arguments=(
     configure
     --sensor "$sensor"
-    --gpio "$gpio_pin"
     --i2c "$i2c_address"
     --unit "$temperature_unit"
     --report-time "$report_time"

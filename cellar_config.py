@@ -15,7 +15,9 @@ from pathlib import Path
 
 CONFIG_FILE = Path("/etc/cellar-pi/config.ini")
 BACKUP_DIR = Path("/var/lib/cellar-pi/backups")
-VALID_SENSORS = {"DHT11", "SHT31"}
+VALID_SENSORS = {"SHT31", "SHT35", "SHT41", "SHT45"}
+SHT3X_SENSORS = {"SHT31", "SHT35"}
+SHT4X_SENSORS = {"SHT41", "SHT45"}
 VALID_UNITS = {"fahrenheit", "celsius"}
 TIME_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
@@ -24,8 +26,7 @@ def default_config() -> configparser.ConfigParser:
     config = configparser.ConfigParser()
     config["general"] = {"temperature_unit": "fahrenheit"}
     config["sensor"] = {
-        "type": "DHT11",
-        "gpio_pin": "4",
+        "type": "SHT31",
         "i2c_address": "0x44",
     }
     config["logging"] = {
@@ -57,10 +58,6 @@ def validate(config: configparser.ConfigParser) -> None:
     if sensor not in VALID_SENSORS:
         raise ValueError(f"unsupported sensor type: {sensor}")
 
-    gpio = config.getint("sensor", "gpio_pin")
-    if not 0 <= gpio <= 27:
-        raise ValueError("gpio_pin must be between 0 and 27")
-
     address_text = config.get("sensor", "i2c_address").strip()
     try:
         address = int(address_text, 0)
@@ -68,6 +65,10 @@ def validate(config: configparser.ConfigParser) -> None:
         raise ValueError(f"invalid I2C address: {address_text}") from error
     if not 0x03 <= address <= 0x77:
         raise ValueError("i2c_address must be between 0x03 and 0x77")
+    if sensor in SHT3X_SENSORS and address not in {0x44, 0x45}:
+        raise ValueError("SHT31 and SHT35 use I2C address 0x44 or 0x45")
+    if sensor in SHT4X_SENSORS and address != 0x44:
+        raise ValueError("SHT41 and SHT45 use I2C address 0x44")
 
     interval = config.getint("logging", "interval_seconds")
     if interval < 5:
@@ -107,10 +108,9 @@ def backup_config() -> Path | None:
     return backup
 
 
-def save_config(config: configparser.ConfigParser) -> Path | None:
+def write_config_atomic(config: configparser.ConfigParser) -> None:
     validate(config)
     CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    backup = backup_config()
     file_descriptor, temporary_name = tempfile.mkstemp(
         prefix=".config-", suffix=".ini", dir=CONFIG_FILE.parent
     )
@@ -124,6 +124,12 @@ def save_config(config: configparser.ConfigParser) -> Path | None:
     finally:
         if os.path.exists(temporary_name):
             os.unlink(temporary_name)
+
+
+def save_config(config: configparser.ConfigParser) -> Path | None:
+    validate(config)
+    backup = backup_config()
+    write_config_atomic(config)
     return backup
 
 
@@ -135,9 +141,7 @@ def restore_config(path: str) -> None:
     config = configparser.ConfigParser()
     config.read(source)
     validate(config)
-    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, CONFIG_FILE)
-    os.chmod(CONFIG_FILE, 0o600)
+    write_config_atomic(config)
 
 
 def print_sanitized(config: configparser.ConfigParser) -> None:
@@ -154,7 +158,7 @@ def configure_all(args: argparse.Namespace) -> Path | None:
     config = load_config()
     config["general"]["temperature_unit"] = args.unit
     config["sensor"]["type"] = args.sensor.upper()
-    config["sensor"]["gpio_pin"] = str(args.gpio)
+    config.remove_option("sensor", "gpio_pin")
     config["sensor"]["i2c_address"] = args.i2c
     config["discord"]["report_time"] = args.report_time
     config["discord"]["report_enabled"] = str(args.report_enabled).lower()
@@ -167,7 +171,7 @@ def mutate(args: argparse.Namespace) -> Path | None:
     config = load_config()
     if args.command == "set-sensor":
         config["sensor"]["type"] = args.sensor.upper()
-        config["sensor"]["gpio_pin"] = str(args.gpio)
+        config.remove_option("sensor", "gpio_pin")
         config["sensor"]["i2c_address"] = args.i2c
     elif args.command == "set-discord":
         config["discord"]["webhook_url"] = args.webhook
@@ -185,6 +189,16 @@ def mutate(args: argparse.Namespace) -> Path | None:
     return save_config(config)
 
 
+def migrate_config() -> Path | None:
+    """Move older installations onto the supported SHT-family V1 schema."""
+    config = load_config()
+    sensor = config.get("sensor", "type", fallback="SHT31").strip().upper()
+    if sensor == "DHT11":
+        config["sensor"]["type"] = "SHT31"
+    config.remove_option("sensor", "gpio_pin")
+    return save_config(config)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -192,6 +206,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("validate")
     subparsers.add_parser("show-sanitized")
     subparsers.add_parser("backup")
+    subparsers.add_parser("migrate")
     get_parser = subparsers.add_parser("get")
     get_parser.add_argument("section")
     get_parser.add_argument("key")
@@ -199,7 +214,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     configure = subparsers.add_parser("configure")
     configure.add_argument("--sensor", required=True, choices=sorted(VALID_SENSORS))
-    configure.add_argument("--gpio", type=int, default=4)
     configure.add_argument("--i2c", default="0x44")
     configure.add_argument("--unit", required=True, choices=sorted(VALID_UNITS))
     configure.add_argument("--report-time", required=True)
@@ -210,7 +224,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     sensor = subparsers.add_parser("set-sensor")
     sensor.add_argument("sensor", choices=sorted(VALID_SENSORS))
-    sensor.add_argument("--gpio", type=int, default=4)
     sensor.add_argument("--i2c", default="0x44")
 
     discord = subparsers.add_parser("set-discord")
@@ -243,6 +256,9 @@ def main() -> int:
     elif args.command == "backup":
         validate(config)
         print(backup_config() or "")
+    elif args.command == "migrate":
+        backup = migrate_config()
+        print(backup or "")
     elif args.command == "get":
         print(config.get(args.section, args.key, fallback=args.fallback))
     elif args.command == "configure":
