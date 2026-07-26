@@ -227,7 +227,7 @@ test_notification() {
         message "Test Notification" \
             "Discord accepted the test notification.\n\nThe logger kept running."
     else
-        show_file "Notification Failed â€” Logger Unaffected" "$output"
+        show_file "Notification Failed - Logger Unaffected" "$output"
     fi
     /usr/bin/rm -f "$output"
 }
@@ -266,7 +266,7 @@ test_daily_report() {
     if [[ "$result" -eq 0 ]]; then
         message "Test Daily Report" "The full daily report was sent successfully."
     else
-        show_file "Report Failed â€” Logger Unaffected" "$output"
+        show_file "Report Failed - Logger Unaffected" "$output"
     fi
     /usr/bin/rm -f "$output"
 }
@@ -382,8 +382,8 @@ temperature_units() {
         --title "Temperature Units" \
         --menu "Choose the display unit:" \
         14 62 4 \
-        "fahrenheit" "Fahrenheit (Â°F)" \
-        "celsius" "Celsius (Â°C)" \
+        "fahrenheit" "Fahrenheit (deg F)" \
+        "celsius" "Celsius (deg C)" \
         "0" "Back" \
         3>&1 1>&2 2>&3) || return
     [[ "$unit" == "0" ]] && return
