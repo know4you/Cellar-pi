@@ -2,6 +2,8 @@
 
 Turn a Raspberry Pi into an easy environmental monitor with temperature, humidity, graphs, Discord reports, and a simple control UI.
 
+We keep track of temps, no matter what Pi gets thrown at us.
+
 ## Planned features
 
 - One-command installation
