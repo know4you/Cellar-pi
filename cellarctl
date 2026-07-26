@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -u
+set -o pipefail
 
 WHIPTAIL="/usr/bin/whiptail"
 SUDO="/usr/bin/sudo"
@@ -11,6 +12,7 @@ SED="/usr/bin/sed"
 WC="/usr/bin/wc"
 PYTHON="/opt/cellar-pi/venv/bin/python"
 CONFIG_TOOL="/opt/cellar-pi/cellar_config.py"
+LOGGER_TOOL="/opt/cellar-pi/cellar_logger.py"
 REPORT_TOOL="/opt/cellar-pi/daily_report.py"
 SETUP="/opt/cellar-pi/setup.sh"
 UPDATE_TOOL="/usr/local/bin/cellar-update"
@@ -48,6 +50,36 @@ wait_countdown() {
         echo 100
     ) | "$WHIPTAIL" --title "$title" \
         --gauge "$detail" 12 70 0
+}
+
+
+wait_for_sensor_health() {
+    local title="$1"
+    local sensor="$2"
+    local since_epoch="$3"
+    local seconds="${4:-35}"
+    local elapsed progress
+    (
+        for ((elapsed = 0; elapsed < seconds; elapsed++)); do
+            if "$SUDO" "$SYSTEMCTL" is-active --quiet "$LOGGER" &&
+               "$SUDO" "$PYTHON" "$LOGGER_TOOL" \
+                   --check-health-since "$since_epoch" \
+                   --expected-sensor "$sensor"
+            then
+                echo 100
+                exit 0
+            fi
+            progress=$((elapsed * 100 / seconds))
+            echo "XXX"
+            echo "$progress"
+            echo "Waiting for a valid $sensor reading. Elapsed time: $elapsed seconds."
+            echo "XXX"
+            /usr/bin/sleep 1
+        done
+        exit 1
+    ) | "$WHIPTAIL" --title "$title" \
+        --gauge "Waiting for the new sensor to report a valid reading." \
+        12 76 0
 }
 
 
@@ -129,7 +161,9 @@ rollback_sensor_config() {
 current_reading() {
     local latest
     please_wait "Current Reading"
-    if latest=$(latest_reading); then
+    if latest=$(
+        "$SUDO" "$PYTHON" "$LOGGER_TOOL" --show-latest 2>/dev/null
+    ); then
         message "Current Reading" "$latest" 12 82
     else
         message "Current Reading" "No readings have been recorded yet."
@@ -148,60 +182,63 @@ recent_readings() {
 
 
 sensor_settings() {
-    local sensor gpio i2c backup
+    local sensor current_sensor i2c backup health_started
+    current_sensor=$(config_get sensor type SHT31)
+    if [[ ! "$current_sensor" =~ ^SHT(31|35|41|45)$ ]]; then
+        current_sensor="SHT31"
+    fi
     sensor=$("$WHIPTAIL" \
         --title "Sensor Settings" \
-        --menu "Choose the temperature/humidity sensor:" \
-        15 68 4 \
-        "DHT11" "GPIO temperature and humidity sensor" \
-        "SHT31" "I2C temperature and humidity sensor" \
-        "0" "Back" \
+        --default-item "$current_sensor" \
+        --menu "Choose the SHT sensor:" \
+        17 72 6 \
+        "SHT31" "SHT31 and SHT31-D" \
+        "SHT35" "Higher-accuracy SHT3x family" \
+        "SHT41" "Higher-accuracy SHT4x family" \
+        "SHT45" "Highest-accuracy SHT4x family" \
         3>&1 1>&2 2>&3) || return
 
-    [[ "$sensor" == "0" ]] && return
-    gpio="4"
-    i2c="0x44"
-
-    if [[ "$sensor" == "DHT11" ]]; then
-        gpio=$("$WHIPTAIL" \
-            --title "DHT11 GPIO" \
-            --inputbox "Enter the BCM GPIO number (0-27):" \
-            11 60 "$(config_get sensor gpio_pin 4)" \
-            3>&1 1>&2 2>&3) || return
-        if ! [[ "$gpio" =~ ^[0-9]+$ ]] || ((gpio < 0 || gpio > 27)); then
-            message "Invalid GPIO" "GPIO must be a number from 0 through 27."
-            return
+    i2c=$(config_get sensor i2c_address 0x44)
+    if [[ "$sensor" == "SHT31" || "$sensor" == "SHT35" ]]; then
+        if [[ "$i2c" != "0x44" && "$i2c" != "0x45" ]]; then
+            i2c="0x44"
         fi
-    else
         i2c=$("$WHIPTAIL" \
-            --title "SHT31 I2C Address" \
-            --inputbox "Enter the I2C address:" \
-            11 60 "$(config_get sensor i2c_address 0x44)" \
+            --title "$sensor I2C Address" \
+            --default-item "$i2c" \
+            --menu "Choose the sensor address:" \
+            14 62 4 \
+            "0x44" "Default address" \
+            "0x45" "Alternate address" \
             3>&1 1>&2 2>&3) || return
-        if ! [[ "$i2c" =~ ^0x[0-9A-Fa-f]{2}$ ]]; then
-            message "Invalid Address" "Use a hexadecimal address such as 0x44."
-            return
-        fi
+    else
+        i2c="0x44"
     fi
 
     "$WHIPTAIL" \
         --title "Confirm Sensor Change" \
-        --yesno "Change the sensor to $sensor?\n\nDiscord and report settings will not be changed." \
+        --yesno "Use the $sensor at I2C address $i2c?\n\nDiscord and report settings will not be changed." \
         12 68 || return
 
     backup=$("$SUDO" "$PYTHON" "$CONFIG_TOOL" \
-        set-sensor "$sensor" --gpio "$gpio" --i2c "$i2c" 2>/tmp/cellar-config-error)
+        set-sensor "$sensor" --i2c "$i2c" 2>/tmp/cellar-config-error)
     if [[ $? -ne 0 ]]; then
         capture_and_show "Sensor Configuration Failed" /usr/bin/cat /tmp/cellar-config-error
         return
     fi
 
-    "$SUDO" "$SYSTEMCTL" restart "$LOGGER"
-    wait_countdown "Sensor Settings" \
-        "Waiting for the logger to test the new sensor configuration." 4
-    if service_is_healthy; then
+    health_started=$(/usr/bin/date +%s)
+    if ! "$SUDO" "$SYSTEMCTL" restart "$LOGGER"; then
+        rollback_sensor_config "$backup"
+        capture_and_show "Sensor Change Rolled Back" \
+            "$SUDO" "$JOURNALCTL" -u "$LOGGER" -n 50 --no-pager
+        return
+    fi
+    if wait_for_sensor_health \
+        "Sensor Settings" "$sensor" "$health_started" 35
+    then
         message "Sensor Updated" \
-            "Sensor configuration is valid and the logger restarted successfully."
+            "The new sensor produced a valid reading.\n\nDiscord and report settings were not changed."
     else
         rollback_sensor_config "$backup"
         capture_and_show "Sensor Change Rolled Back" \
@@ -291,15 +328,20 @@ discord_settings() {
 
 
 test_notification() {
-    local output result
+    local output result logger_before logger_after
     output=$(/usr/bin/mktemp)
+    logger_before=$("$SUDO" "$SYSTEMCTL" is-active "$LOGGER" 2>/dev/null || true)
     run_with_elapsed "Test Notification" \
         "Sending a Discord test message." "$output" \
         "$SUDO" "$PYTHON" "$REPORT_TOOL" --test-notification
     result=$?
+    logger_after=$("$SUDO" "$SYSTEMCTL" is-active "$LOGGER" 2>/dev/null || true)
+    /usr/bin/printf \
+        "\nLogger before notification test: %s\nLogger after notification test: %s\n" \
+        "$logger_before" "$logger_after" >>"$output"
     if [[ "$result" -eq 0 ]]; then
         message "Test Notification" \
-            "Discord accepted the test notification.\n\nThe logger kept running."
+            "Discord accepted the test notification.\n\nLogger before: $logger_before\nLogger after: $logger_after"
     else
         show_file "Notification Failed - Logger Unaffected" "$output"
     fi
@@ -322,15 +364,20 @@ schedule_status() {
 
 
 send_graph_now() {
-    local output result
+    local output result logger_before logger_after
     output=$(/usr/bin/mktemp)
+    logger_before=$("$SUDO" "$SYSTEMCTL" is-active "$LOGGER" 2>/dev/null || true)
     run_with_elapsed "Send Graph Now" \
         "Generating and sending the latest 24-hour graph." "$output" \
         "$SUDO" "$PYTHON" "$REPORT_TOOL" --test-report
     result=$?
+    logger_after=$("$SUDO" "$SYSTEMCTL" is-active "$LOGGER" 2>/dev/null || true)
+    /usr/bin/printf \
+        "\nLogger before report: %s\nLogger after report: %s\n" \
+        "$logger_before" "$logger_after" >>"$output"
     if [[ "$result" -eq 0 ]]; then
         message "Send Graph Now" \
-            "The graph and daily report were sent to Discord.\n\nThe saved schedule was not changed."
+            "The graph and daily report were sent to Discord.\n\nThe saved schedule was not changed.\nLogger before: $logger_before\nLogger after: $logger_after"
     else
         show_file "Graph Send Failed - Logger Unaffected" "$output"
     fi
@@ -423,23 +470,29 @@ notifications_menu() {
 
 
 system_status() {
-    local logger timer sensor last webhook enabled time
+    local logger timer sensor sensor_health last webhook enabled time
     please_wait "System Status"
     logger=$("$SUDO" "$SYSTEMCTL" is-active "$LOGGER" 2>/dev/null || true)
     timer=$("$SUDO" "$SYSTEMCTL" is-active "$REPORT_TIMER" 2>/dev/null || true)
     sensor=$(config_get sensor type unknown)
+    sensor_health=$(
+        "$SUDO" "$PYTHON" "$LOGGER_TOOL" --show-status 2>/dev/null ||
+            /usr/bin/printf "Sensor health: No status yet"
+    )
     webhook=$(config_get discord webhook_url)
     enabled=$(config_get discord report_enabled false)
     time=$(config_get discord report_time 19:00)
     [[ -n "$webhook" ]] && webhook="Configured" || webhook="Not configured"
-    if last=$(latest_reading); then
+    if last=$(
+        "$SUDO" "$PYTHON" "$LOGGER_TOOL" --show-latest 2>/dev/null
+    ); then
         :
     else
         last="No readings yet"
     fi
     message "System Status" \
-        "Logger: $logger\nSensor: $sensor\nReport timer: $timer\nDiscord: $webhook\nDaily report: $enabled at $time\n\nLast reading:\n$last" \
-        18 84
+        "Logger: $logger\nSensor: $sensor\n$sensor_health\nReport timer: $timer\nDiscord: $webhook\nDaily report: $enabled at $time\n\nLast reading:\n$last" \
+        22 84
 }
 
 
@@ -468,7 +521,11 @@ service_action() {
     if "$WHIPTAIL" --title "$action Logger" \
         --yesno "$action the logger now?" 10 58
     then
-        "$SUDO" "$SYSTEMCTL" "${action,,}" "$LOGGER"
+        if ! "$SUDO" "$SYSTEMCTL" "${action,,}" "$LOGGER"; then
+            capture_and_show "$action Failed" \
+                "$SUDO" "$JOURNALCTL" -u "$LOGGER" -n 50 --no-pager
+            return
+        fi
         wait_countdown "$action Logger" \
             "Waiting for the logger to settle." 2
         if [[ "$action" == "Stop" ]]; then
@@ -514,7 +571,7 @@ update_cellar_pi() {
 
 advanced_menu() {
     while true; do
-        local choice backup
+        local choice backup sensor health_started
         choice=$("$WHIPTAIL" \
             --title "Advanced / Troubleshooting" \
             --menu "Choose an option:" \
@@ -550,17 +607,12 @@ advanced_menu() {
             7) service_action "Start" ;;
             8)
                 if "$WHIPTAIL" --title "Repair Python Packages" \
-                    --yesno "Reinstall the project Python packages?\n\nYour sudo password may be requested." \
+                    --yesno "Reinstall the project Python packages?\n\nOnly the exact Cellar-pi repair command is allowed." \
                     12 68
                 then
-                    if "$SUDO" -v; then
-                        capture_and_show "Package Repair" \
-                            "$SUDO" "$PYTHON" -m pip install \
-                            --requirement /opt/cellar-pi/requirements.txt
-                    else
-                        message "Package Repair" \
-                            "Sudo authentication failed. Nothing was changed."
-                    fi
+                    capture_and_show "Package Repair" \
+                        "$SUDO" "$PYTHON" -m pip install \
+                        --requirement /opt/cellar-pi/requirements.txt
                 fi
                 ;;
             9) update_cellar_pi ;;
@@ -571,12 +623,15 @@ advanced_menu() {
                 then
                     backup=$("$SUDO" "$PYTHON" "$CONFIG_TOOL" backup)
                     if "$SUDO" "$SETUP"; then
-                        "$SUDO" "$SYSTEMCTL" restart "$LOGGER"
-                        wait_countdown "Full Setup Wizard" \
-                            "Waiting for the logger to validate the configuration." 4
-                        if service_is_healthy; then
+                        sensor=$(config_get sensor type unknown)
+                        health_started=$(/usr/bin/date +%s)
+                        if "$SUDO" "$SYSTEMCTL" restart "$LOGGER" &&
+                           wait_for_sensor_health \
+                               "Full Setup Wizard" \
+                               "$sensor" "$health_started" 35
+                        then
                             message "Full Setup Wizard" \
-                                "Configuration validated and the logger restarted successfully."
+                                "Configuration validated and the sensor produced a valid reading."
                         else
                             rollback_sensor_config "$backup"
                             capture_and_show "Setup Rolled Back" \

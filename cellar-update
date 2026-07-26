@@ -17,11 +17,13 @@ cleanup() {
 }
 
 
-restore_file() {
+restore_or_remove_file() {
     local backup_name="$1"
     local destination="$2"
     if [[ -e "$BACKUP_DIR/$backup_name" ]]; then
         /usr/bin/cp -a "$BACKUP_DIR/$backup_name" "$destination"
+    else
+        /usr/bin/rm -f -- "$destination"
     fi
 }
 
@@ -35,17 +37,19 @@ rollback() {
     if [[ -d "$BACKUP_DIR/install-dir" ]]; then
         /usr/bin/rm -rf -- "$INSTALL_DIR"
         /usr/bin/cp -a "$BACKUP_DIR/install-dir" "$INSTALL_DIR"
+    else
+        /usr/bin/rm -rf -- "$INSTALL_DIR"
     fi
 
-    restore_file "cellarctl" "/usr/local/bin/cellarctl"
-    restore_file "cellar-update" "/usr/local/bin/cellar-update"
-    restore_file "cellar-logger.service" \
+    restore_or_remove_file "cellarctl" "/usr/local/bin/cellarctl"
+    restore_or_remove_file "cellar-update" "/usr/local/bin/cellar-update"
+    restore_or_remove_file "cellar-logger.service" \
         "/etc/systemd/system/cellar-logger.service"
-    restore_file "cellar-report.service" \
+    restore_or_remove_file "cellar-report.service" \
         "/etc/systemd/system/cellar-report.service"
-    restore_file "cellar-report.timer" \
+    restore_or_remove_file "cellar-report.timer" \
         "/etc/systemd/system/cellar-report.timer"
-    restore_file "cellar-pi-sudoers" "/etc/sudoers.d/cellar-pi"
+    restore_or_remove_file "cellar-pi-sudoers" "/etc/sudoers.d/cellar-pi"
 
     /usr/bin/ln -sfn /usr/local/bin/cellarctl /uc
     /usr/bin/systemctl daemon-reload
@@ -118,6 +122,19 @@ do
 done
 
 echo "Checking the downloaded update..."
+if /usr/bin/grep -rIl $'\r' \
+    "$TEMP_DIR/repository/install.sh" \
+    "$TEMP_DIR/repository/setup.sh" \
+    "$TEMP_DIR/repository/cellarctl" \
+    "$TEMP_DIR/repository/cellar-update" \
+    "$TEMP_DIR/repository/cellar_logger.py" \
+    "$TEMP_DIR/repository/cellar_config.py" \
+    "$TEMP_DIR/repository/daily_report.py" \
+    "$TEMP_DIR/repository/requirements.txt" >/dev/null
+then
+    echo "A downloaded text file still contains carriage returns." >&2
+    false
+fi
 /usr/bin/bash -n "$TEMP_DIR/repository/install.sh"
 /usr/bin/bash -n "$TEMP_DIR/repository/setup.sh"
 /usr/bin/bash -n "$TEMP_DIR/repository/cellarctl"
@@ -128,7 +145,11 @@ echo "Checking the downloaded update..."
     "$TEMP_DIR/repository/daily_report.py"
 
 echo "Installing the update..."
-/usr/bin/bash "$TEMP_DIR/repository/install.sh" --upgrade
+CELLAR_SOURCE_DIR="$TEMP_DIR/repository" \
+CELLAR_DEFER_UPDATER_INSTALL=1 \
+    /usr/bin/bash "$TEMP_DIR/repository/install.sh" --upgrade
+/usr/bin/install -m 755 "$TEMP_DIR/repository/cellar-update" \
+    /usr/local/bin/cellar-update
 
 if [[ "$LOGGER_WAS_ACTIVE" == "true" ]] &&
    ! /usr/bin/systemctl is-active --quiet cellar-logger.service; then
@@ -145,3 +166,4 @@ trap - ERR
 echo
 echo "Cellar-pi is up to date."
 echo "Configuration and readings were preserved."
+echo "Installed commit: $(/usr/bin/git -C "$TEMP_DIR/repository" rev-parse --short HEAD)"

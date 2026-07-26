@@ -10,17 +10,10 @@ from __future__ import annotations
 import argparse
 import configparser
 import json
+import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
-
-import matplotlib
-
-matplotlib.use("Agg")
-
-import matplotlib.dates as mdates
-import matplotlib.pyplot as plt
-import pandas as pd
-import requests
 
 
 CONFIG_FILE = Path("/etc/cellar-pi/config.ini")
@@ -46,6 +39,8 @@ def webhook_url(config: configparser.ConfigParser) -> str:
 
 
 def post_message(url: str, message: str, graph: Path | None = None) -> None:
+    import requests
+
     if graph is None:
         response = requests.post(url, json={"content": message}, timeout=30)
     else:
@@ -59,14 +54,22 @@ def post_message(url: str, message: str, graph: Path | None = None) -> None:
     response.raise_for_status()
 
 
-def read_recent_data() -> pd.DataFrame:
+def read_recent_data():
+    import pandas as pd
+
     if not CSV_FILE.exists():
         raise RuntimeError("No sensor readings have been recorded yet")
     data = pd.read_csv(CSV_FILE)
     required = {"timestamp", "temperature_f", "humidity_percent"}
     if not required.issubset(data.columns):
         raise RuntimeError("The readings file is missing required columns")
-    data["timestamp"] = pd.to_datetime(data["timestamp"], errors="coerce")
+    data["timestamp"] = pd.to_datetime(
+        data["timestamp"],
+        errors="coerce",
+        utc=True,
+    )
+    local_timezone = datetime.now().astimezone().tzinfo
+    data["timestamp"] = data["timestamp"].dt.tz_convert(local_timezone)
     data["temperature_f"] = pd.to_numeric(data["temperature_f"], errors="coerce")
     data["humidity_percent"] = pd.to_numeric(
         data["humidity_percent"], errors="coerce"
@@ -78,15 +81,19 @@ def read_recent_data() -> pd.DataFrame:
     return data[data["timestamp"] >= cutoff].copy()
 
 
-def temperature_values(
-    recent: pd.DataFrame, unit: str
-) -> tuple[pd.Series, str]:
+def temperature_values(recent, unit: str):
     if unit == "celsius":
         return (recent["temperature_f"] - 32) * 5 / 9, "deg C"
     return recent["temperature_f"], "deg F"
 
 
-def make_graph(recent: pd.DataFrame, unit: str) -> tuple[Path, pd.Series, str]:
+def make_graph(recent, unit: str):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.dates as mdates
+    import matplotlib.pyplot as plt
+
     GRAPH_DIR.mkdir(parents=True, exist_ok=True)
     temperatures, suffix = temperature_values(recent, unit)
     figure, temperature_axis = plt.subplots(figsize=(14, 7))
@@ -116,6 +123,24 @@ def make_graph(recent: pd.DataFrame, unit: str) -> tuple[Path, pd.Series, str]:
     figure.savefig(GRAPH_FILE, dpi=150)
     plt.close(figure)
     return GRAPH_FILE, temperatures, suffix
+
+
+def save_report_state(report_date: str) -> None:
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    file_descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".report-state-",
+        suffix=".json",
+        dir=STATE_FILE.parent,
+    )
+    try:
+        with os.fdopen(file_descriptor, "w", encoding="utf-8") as handle:
+            json.dump({"last_report_date": report_date}, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_name, STATE_FILE)
+    finally:
+        if os.path.exists(temporary_name):
+            os.unlink(temporary_name)
 
 
 def send_full_report(config: configparser.ConfigParser) -> None:
@@ -159,7 +184,7 @@ def scheduled_run(config: configparser.ConfigParser) -> None:
     if state.get("last_report_date") == today:
         return
     send_full_report(config)
-    STATE_FILE.write_text(json.dumps({"last_report_date": today}), encoding="utf-8")
+    save_report_state(today)
 
 
 def main() -> int:
