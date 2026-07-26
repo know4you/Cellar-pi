@@ -220,7 +220,7 @@ echo "[12/12] Verifying installation..."
 if /usr/bin/systemctl is-active --quiet cellar-logger.service; then
     LOGGER_RESULT="running"
 else
-    LOGGER_RESULT="not running â€” use /uc > Advanced / Troubleshooting > View Logger Logs"
+    LOGGER_RESULT="not running - use /uc > Advanced / Troubleshooting > View Logger Logs"
 fi
 
 echo
