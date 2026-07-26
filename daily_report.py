@@ -82,8 +82,8 @@ def temperature_values(
     recent: pd.DataFrame, unit: str
 ) -> tuple[pd.Series, str]:
     if unit == "celsius":
-        return (recent["temperature_f"] - 32) * 5 / 9, "Â°C"
-    return recent["temperature_f"], "Â°F"
+        return (recent["temperature_f"] - 32) * 5 / 9, "deg C"
+    return recent["temperature_f"], "deg F"
 
 
 def make_graph(recent: pd.DataFrame, unit: str) -> tuple[Path, pd.Series, str]:
@@ -102,7 +102,7 @@ def make_graph(recent: pd.DataFrame, unit: str) -> tuple[Path, pd.Series, str]:
         linewidth=2,
         label="Humidity",
     )
-    temperature_axis.set_title("Cellar-pi â€” Last 24 Hours", fontweight="bold")
+    temperature_axis.set_title("Cellar-pi - Last 24 Hours", fontweight="bold")
     temperature_axis.set_ylabel(f"Temperature ({suffix})", color="red")
     humidity_axis.set_ylabel("Humidity (%)", color="blue")
     temperature_axis.tick_params(axis="y", colors="red")
@@ -172,7 +172,7 @@ def main() -> int:
     if args.test_notification:
         post_message(
             webhook_url(config),
-            "âœ… Cellar-pi successfully connected to Discord.",
+            "[OK] Cellar-pi successfully connected to Discord.",
         )
     elif args.test_report:
         send_full_report(config)
