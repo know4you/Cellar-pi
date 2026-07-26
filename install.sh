@@ -66,7 +66,7 @@ apt-get install -y \
     python3-requests \
     python3-smbus \
     i2c-tools \
-    libgpiod2
+    libgpiod3
 
 echo "[3/10] Downloading Cellar-pi..."
 TEMP_DIR=$(mktemp -d)
