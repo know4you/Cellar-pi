@@ -13,6 +13,7 @@ SUDOERS_FILE="/etc/sudoers.d/cellar-pi"
 TEMP_DIR=""
 SOURCE_DIR=""
 MODE="${1:-install}"
+I2C_REBOOT_REQUIRED="false"
 
 
 cleanup() {
@@ -84,7 +85,14 @@ echo "[2/12] Installing operating-system packages..."
     python3-pandas \
     python3-requests \
     python3-smbus \
-    i2c-tools
+    i2c-tools \
+    raspi-config
+
+echo "Enabling the Raspberry Pi I2C interface..."
+/usr/bin/raspi-config nonint do_i2c 0
+if [[ ! -e /dev/i2c-1 ]]; then
+    I2C_REBOOT_REQUIRED="true"
+fi
 
 echo "[3/12] Downloading Cellar-pi..."
 if [[ -n "${CELLAR_SOURCE_DIR:-}" ]]; then
@@ -307,4 +315,9 @@ echo "User Control: /uc"
 echo "Logger: $LOGGER_RESULT"
 echo "Report timer: running"
 echo "Sudo rules: validated for $INSTALL_USER"
+if [[ "$I2C_REBOOT_REQUIRED" == "true" ]]; then
+    echo "I2C: enabled; reboot the Pi before testing the SHT sensor"
+else
+    echo "I2C: enabled"
+fi
 echo
