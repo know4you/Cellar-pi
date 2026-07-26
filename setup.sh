@@ -194,4 +194,3 @@ fi
     --title "Setup Complete" \
     --msgbox "Configuration saved and validated.\n\nSensor: $sensor\nTemperature unit: $temperature_unit\nDaily report: $report_enabled at $report_time" \
     15 70 || true
-
