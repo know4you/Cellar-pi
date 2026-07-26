@@ -31,7 +31,7 @@ get_value() {
 "$WHIPTAIL" \
     --title "Cellar-pi Setup" \
     --msgbox "This wizard configures the initial sensor, units, and Discord reporting.\n\nUse /uc later to change one setting without rerunning everything." \
-    14 72
+    14 72 || exit 0
 
 current_sensor=$(get_value sensor type DHT11)
 sensor=$("$WHIPTAIL" \
@@ -193,5 +193,5 @@ fi
 "$WHIPTAIL" \
     --title "Setup Complete" \
     --msgbox "Configuration saved and validated.\n\nSensor: $sensor\nTemperature unit: $temperature_unit\nDaily report: $report_enabled at $report_time" \
-    15 70
+    15 70 || true
 
