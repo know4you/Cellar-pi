@@ -103,6 +103,20 @@ fi
 echo "Downloading the latest Cellar-pi release..."
 /usr/bin/git clone --depth 1 "$REPO_URL" "$TEMP_DIR/repository"
 
+echo "Normalizing downloaded text files..."
+for text_file in \
+    install.sh \
+    setup.sh \
+    cellarctl \
+    cellar-update \
+    cellar_logger.py \
+    cellar_config.py \
+    daily_report.py \
+    requirements.txt
+do
+    /usr/bin/sed -i 's/\r$//' "$TEMP_DIR/repository/$text_file"
+done
+
 echo "Checking the downloaded update..."
 /usr/bin/bash -n "$TEMP_DIR/repository/install.sh"
 /usr/bin/bash -n "$TEMP_DIR/repository/setup.sh"
@@ -131,4 +145,3 @@ trap - ERR
 echo
 echo "Cellar-pi is up to date."
 echo "Configuration and readings were preserved."
-
