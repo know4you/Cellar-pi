@@ -263,4 +263,3 @@ if __name__ == "__main__":
     except (ValueError, configparser.Error) as error:
         print(f"ERROR: {error}")
         raise SystemExit(2)
-
