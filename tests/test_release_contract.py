@@ -43,6 +43,18 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn('CELLAR_SOURCE_DIR="$TEMP_DIR/repository"', script)
         self.assertIn("CELLAR_DEFER_UPDATER_INSTALL=1", script)
 
+    def test_installer_enables_i2c_even_during_an_upgrade(self) -> None:
+        script = (ROOT / "install.sh").read_text(encoding="utf-8")
+        self.assertIn("raspi-config", script)
+        self.assertIn(
+            "/usr/bin/raspi-config nonint do_i2c 0",
+            script,
+        )
+        self.assertLess(
+            script.index("/usr/bin/raspi-config nonint do_i2c 0"),
+            script.index('if [[ "$MODE" == "--upgrade"'),
+        )
+
     def test_sudo_rules_are_scoped(self) -> None:
         script = (ROOT / "install.sh").read_text(encoding="utf-8")
         self.assertNotIn("NOPASSWD: ALL", script)
