@@ -90,6 +90,19 @@ echo "[3/12] Downloading Cellar-pi..."
 TEMP_DIR=$(/usr/bin/mktemp -d)
 /usr/bin/git clone --depth 1 "$REPO_URL" "$TEMP_DIR/repository"
 
+for text_file in \
+    install.sh \
+    setup.sh \
+    cellarctl \
+    cellar-update \
+    cellar_logger.py \
+    cellar_config.py \
+    daily_report.py \
+    requirements.txt
+do
+    /usr/bin/sed -i 's/\r$//' "$TEMP_DIR/repository/$text_file"
+done
+
 required_files=(
     cellar_logger.py
     cellar_config.py
@@ -247,4 +260,3 @@ echo "Logger: $LOGGER_RESULT"
 echo "Report timer: running"
 echo "Sudo rules: validated for $INSTALL_USER"
 echo
-
