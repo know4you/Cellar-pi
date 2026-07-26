@@ -1,11 +1,19 @@
 # Cellar-pi
 
-Turn any Raspberry Pi into a reliable environmental monitor in minutes.
+Turn a Raspberry Pi into an easy environmental monitor with temperature, humidity, graphs, Discord reports, and a simple control UI.
 
-✔ One-command installation
-✔ Temperature & humidity monitoring
-✔ Automatic graphs
-✔ Discord reports
-✔ Built-in `/uc` control panel
-✔ DHT11, SHT31 (BME280 coming soon)
-✔ Open source
+## Planned features
+
+- One-command installation
+- DHT11 and SHT31 support
+- Automatic sensor logging
+- Daily Discord reports
+- Temperature and humidity graphs
+- `/uc` terminal control panel
+- Easy sensor switching
+- Safe updates and configuration backups
+- Future BME280 pressure support
+
+## Status
+
+Early development.
