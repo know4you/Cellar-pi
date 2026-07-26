@@ -1,20 +1,20 @@
 to download start with a fresh pie install im testing in pie lite 32 bit
+ive only test on pie zero with 32 gb sd card
 you need to sign in via ssh 
   copy and paste
 hostname
-whoami
-cat /etc/os-release | grep PRETTY_NAME
+"whoami
+cat /etc/os-release | grep PRETTY_NAME"
   make sure you see your pie name
 then we need to update the pie using this 
-  
-sudo apt update
-sudo apt install -y git
+"sudo apt update
+sudo apt install -y git"
 should start downloading and applying updates when its done we need to copy and paste 
-cd ~
+"cd ~
 git clone https://github.com/know4you/Cellar-pi.git
-cd Cellar-pi
+cd Cellar-pi"
     make sure the files are there by
-ls -la
+"ls -la"
   You should see something like:
 README.md
 cellar_logger.py
@@ -25,12 +25,18 @@ setup.sh
 
 Before we actually run the installer
 Let's do a quick sanity check on the scripts:
- bash -n install.sh
+ "bash -n install.sh
 bash -n setup.sh
-python3 -m py_compile cellar_logger.py
+python3 -m py_compile cellar_logger.py"
 
   If those commands produce no output, that's a good sign—they passed their syntax checks.
 now lets intall :) 
-sudo bash install.sh
-shouldnt take that long hopefuly 
+"sudo bash install.sh"
+shouldnt take that long hopefuly....
+it will look like it get stuck scary trust me
+i know but give it a min or 10 lol but it should start back up!
+
+
 thank you for instaling projet cellar-pie this all started do to wanting to move my homelab into my cellar bc it got my bed room to hot hahaha :) 
+maybe if this does take off ill add a coffee link idk yet but i really hope some one enjoys this!!!
+ive tryed my hardest to make this stupit easy...
