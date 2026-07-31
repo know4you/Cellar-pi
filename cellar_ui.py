@@ -144,7 +144,7 @@ class CellarUI:
             MenuItem("Change Report Time", "Set the first report time in 24-hour format.", action=self.set_report_time),
             MenuItem("Frequency / Graph Range", "Choose 12-hour or 24-hour reports.", action=self.set_report_frequency),
             MenuItem("View Schedule Status", "Show the saved schedule and timer state.", action=self.show_notification_status),
-            MenuItem("Test Scheduled Report", "Build and send a report now without changing the schedule.", action=self.test_report),
+            MenuItem("Send Graph Now", "Build and send the graph now without changing the schedule.", action=self.test_report),
             MenuItem("Back", "Return to Notifications.", action=self.go_back),
         ]
 
