@@ -74,8 +74,8 @@ temperature_unit=$("$WHIPTAIL" \
     --default-item "$current_unit" \
     --menu "Choose the display unit:" \
     15 66 5 \
-    "fahrenheit" "Fahrenheit (deg F)" \
-    "celsius" "Celsius (deg C)" \
+    "fahrenheit" "Fahrenheit (°F)" \
+    "celsius" "Celsius (°C)" \
     3>&1 1>&2 2>&3) || exit 0
 
 current_time=$(get_value discord report_time 19:00)

@@ -115,6 +115,8 @@ for text_file in \
     cellar-update \
     cellar_logger.py \
     cellar_config.py \
+    cellar_core.py \
+    cellar_ui.py \
     daily_report.py \
     requirements.txt
 do
@@ -142,6 +144,8 @@ fi
 /usr/bin/python3 -m py_compile \
     "$TEMP_DIR/repository/cellar_logger.py" \
     "$TEMP_DIR/repository/cellar_config.py" \
+    "$TEMP_DIR/repository/cellar_core.py" \
+    "$TEMP_DIR/repository/cellar_ui.py" \
     "$TEMP_DIR/repository/daily_report.py"
 
 echo "Installing the update..."

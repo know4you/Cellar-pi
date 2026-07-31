@@ -180,9 +180,9 @@ def show_latest_reading() -> int:
         temperature = float(row["temperature_f"])
         if unit == "celsius":
             temperature = (temperature - 32) * 5 / 9
-            temperature_text = f"{temperature:.1f} deg C"
+            temperature_text = f"{temperature:.1f}°C"
         else:
-            temperature_text = f"{temperature:.1f} deg F"
+            temperature_text = f"{temperature:.1f}°F"
 
     humidity_text = "Unavailable"
     if row.get("humidity_percent"):
@@ -475,7 +475,7 @@ def describe_reading(reading: Reading) -> str:
     values = []
 
     if reading.temperature_f is not None:
-        values.append(f"{reading.temperature_f:.2f} deg F")
+        values.append(f"{reading.temperature_f:.2f}°F")
 
     if reading.humidity_percent is not None:
         values.append(f"{reading.humidity_percent:.2f}% RH")

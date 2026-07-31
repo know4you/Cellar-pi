@@ -12,6 +12,7 @@ import configparser
 import json
 import os
 import tempfile
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -20,6 +21,8 @@ CONFIG_FILE = Path("/etc/cellar-pi/config.ini")
 CSV_FILE = Path("/var/lib/cellar-pi/cellar_readings.csv")
 GRAPH_DIR = Path("/var/lib/cellar-pi/graphs")
 STATE_FILE = Path("/var/lib/cellar-pi/report-state.json")
+LOCK_FILE = Path("/var/lib/cellar-pi/report-send.lock")
+LOCK_STALE_SECONDS = 300
 
 
 def load_config() -> configparser.ConfigParser:
@@ -82,8 +85,8 @@ def read_recent_data(window_hours: int):
 
 def temperature_values(recent, unit: str):
     if unit == "celsius":
-        return (recent["temperature_f"] - 32) * 5 / 9, "deg C"
-    return recent["temperature_f"], "deg F"
+        return (recent["temperature_f"] - 32) * 5 / 9, "°C"
+    return recent["temperature_f"], "°F"
 
 
 def make_graph(recent, unit: str, window_hours: int):
@@ -146,6 +149,46 @@ def save_report_state(report_slot: str) -> None:
             os.unlink(temporary_name)
 
 
+@contextmanager
+def report_lock():
+    """Prevent two timer invocations from sending the same report window."""
+    LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    descriptor: int | None = None
+    acquired = False
+    for attempt in range(2):
+        try:
+            descriptor = os.open(
+                LOCK_FILE,
+                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                0o600,
+            )
+            os.write(descriptor, str(os.getpid()).encode("ascii"))
+            acquired = True
+            break
+        except FileExistsError:
+            try:
+                age = datetime.now().timestamp() - LOCK_FILE.stat().st_mtime
+            except OSError:
+                age = 0
+            if attempt == 0 and age > LOCK_STALE_SECONDS:
+                try:
+                    LOCK_FILE.unlink()
+                except OSError:
+                    pass
+                continue
+            break
+    try:
+        yield acquired
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if acquired:
+            try:
+                LOCK_FILE.unlink()
+            except FileNotFoundError:
+                pass
+
+
 def send_full_report(config: configparser.ConfigParser) -> None:
     window_hours = config.getint(
         "discord",
@@ -156,12 +199,6 @@ def send_full_report(config: configparser.ConfigParser) -> None:
     unit = config.get("general", "temperature_unit", fallback="fahrenheit").lower()
     graph, temperatures, suffix = make_graph(recent, unit, window_hours)
     humidity = recent["humidity_percent"]
-    sensor = "unknown"
-    if "temperature_humidity_sensor" in recent.columns:
-        sensor = str(recent["temperature_humidity_sensor"].iloc[-1])
-    elif config.has_option("sensor", "type"):
-        sensor = config.get("sensor", "type")
-
     message = (
         f"**Cellar-pi {window_hours}-Hour Report**\n"
         f"Temperature: **{temperatures.iloc[-1]:.1f}{suffix}** "
@@ -170,7 +207,7 @@ def send_full_report(config: configparser.ConfigParser) -> None:
         f"Humidity: **{humidity.iloc[-1]:.1f}%** "
         f"(low {humidity.min():.1f}, high {humidity.max():.1f}, "
         f"average {humidity.mean():.1f})\n"
-        f"Sensor: {sensor} | Readings: {len(recent)}"
+        f"Readings: {len(recent)}"
     )
     post_message(webhook_url(config), message, graph)
 
@@ -208,22 +245,25 @@ def scheduled_run(config: configparser.ConfigParser) -> None:
     due_slot = latest_due_slot(now, report_time, frequency_hours)
     if due_slot is None:
         return
-    state = {}
-    if STATE_FILE.exists():
-        try:
-            state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            state = {}
-    slot_id = due_slot.isoformat(timespec="minutes")
-    if state.get("last_report_slot") == slot_id:
-        return
-    if (
-        not state.get("last_report_slot")
-        and state.get("last_report_date") == now.date().isoformat()
-    ):
-        return
-    send_full_report(config)
-    save_report_state(slot_id)
+    with report_lock() as acquired:
+        if not acquired:
+            return
+        state = {}
+        if STATE_FILE.exists():
+            try:
+                state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                state = {}
+        slot_id = due_slot.isoformat(timespec="minutes")
+        if state.get("last_report_slot") == slot_id:
+            return
+        if (
+            not state.get("last_report_slot")
+            and state.get("last_report_date") == now.date().isoformat()
+        ):
+            return
+        send_full_report(config)
+        save_report_state(slot_id)
 
 
 def main() -> int:

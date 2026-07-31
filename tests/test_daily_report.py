@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import daily_report
+import pandas as pd
 from cellar_config import default_config
 
 
@@ -60,8 +61,10 @@ class DailyReportTests(unittest.TestCase):
         now = datetime(2026, 7, 26, 19, 0, tzinfo=timezone.utc)
         with tempfile.TemporaryDirectory() as directory:
             state_file = Path(directory) / "report-state.json"
+            lock_file = Path(directory) / "report-send.lock"
             with (
                 patch.object(daily_report, "STATE_FILE", state_file),
+                patch.object(daily_report, "LOCK_FILE", lock_file),
                 patch.object(daily_report, "datetime") as mocked_datetime,
                 patch.object(daily_report, "send_full_report") as send,
             ):
@@ -69,6 +72,45 @@ class DailyReportTests(unittest.TestCase):
                 daily_report.scheduled_run(config)
                 daily_report.scheduled_run(config)
         send.assert_called_once_with(config)
+
+    def test_report_lock_blocks_a_second_sender(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            lock_file = Path(directory) / "report-send.lock"
+            with patch.object(daily_report, "LOCK_FILE", lock_file):
+                with daily_report.report_lock() as first:
+                    with daily_report.report_lock() as second:
+                        self.assertTrue(first)
+                        self.assertFalse(second)
+                with daily_report.report_lock() as after_release:
+                    self.assertTrue(after_release)
+
+    def test_discord_report_uses_symbols_and_omits_sensor_line(self) -> None:
+        config = default_config()
+        config["discord"]["webhook_url"] = (
+            "https://discord.com/api/webhooks/example/token"
+        )
+        recent = pd.DataFrame(
+            {
+                "temperature_f": [70.0, 71.0],
+                "humidity_percent": [60.0, 61.0],
+                "temperature_humidity_sensor": ["SHT31", "SHT31"],
+            }
+        )
+        graph = Path("report.png")
+        with (
+            patch.object(daily_report, "read_recent_data", return_value=recent),
+            patch.object(
+                daily_report,
+                "make_graph",
+                return_value=(graph, recent["temperature_f"], "°F"),
+            ),
+            patch.object(daily_report, "post_message") as post,
+        ):
+            daily_report.send_full_report(config)
+        message = post.call_args.args[1]
+        self.assertIn("71.0°F", message)
+        self.assertIn("Readings: 2", message)
+        self.assertNotIn("Sensor:", message)
 
 
 if __name__ == "__main__":
