@@ -34,7 +34,9 @@ class ReleaseContractTests(unittest.TestCase):
         ):
             self.assertIn(label, script)
         self.assertIn("curses.wrapper(main)", script)
-        self.assertIn("↑↓ Move", script)
+        self.assertIn("â†‘â†“/WS Move", script)
+        self.assertIn("â†’/D/Enter Open", script)
+        self.assertIn("â†/A/Esc Back", script)
         self.assertNotIn("--gauge", script)
 
     def test_notification_code_does_not_import_or_control_logger(self) -> None:
@@ -164,3 +166,4 @@ class ReleaseContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
