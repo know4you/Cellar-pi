@@ -106,9 +106,10 @@ After installation finishes:
 ```
 
 `/uc` stands for User Control. It opens a full-screen, keyboard-first terminal
-interface. Use the arrow keys to move, Enter to select, Esc to go back, and Q
-to quit. It lets you view readings, change the sensor, configure notifications,
-check system health, update Cellar-pi, and troubleshoot the logger.
+interface. Use the arrow keys to move, Enter or the right arrow to open,
+Esc or the left arrow to go back, and Q to quit. It lets you view readings, change the
+sensor, configure notifications, check system health, update Cellar-pi, and
+troubleshoot the logger.
 
 If a sensor is not showing up, choose:
 
@@ -143,3 +144,4 @@ monitor slowly turned into this.
 
 I genuinely hope someone enjoys using it. I have tried my hardest to make it
 simple enough that nearly anyone can get it running.
+
