@@ -113,6 +113,8 @@ for text_file in \
     cellar-update \
     cellar_logger.py \
     cellar_config.py \
+    cellar_core.py \
+    cellar_ui.py \
     daily_report.py \
     requirements.txt
 do
@@ -123,6 +125,8 @@ required_files=(
     install.sh
     cellar_logger.py
     cellar_config.py
+    cellar_core.py
+    cellar_ui.py
     daily_report.py
     cellarctl
     cellar-update
@@ -141,6 +145,8 @@ done
 /usr/bin/python3 -m py_compile \
     "$SOURCE_DIR/cellar_logger.py" \
     "$SOURCE_DIR/cellar_config.py" \
+    "$SOURCE_DIR/cellar_core.py" \
+    "$SOURCE_DIR/cellar_ui.py" \
     "$SOURCE_DIR/daily_report.py"
 
 echo "[4/12] Creating directories..."
@@ -179,6 +185,10 @@ echo "[6/12] Installing project files..."
     "$INSTALL_DIR/cellar_logger.py"
 /usr/bin/install -m 755 "$SOURCE_DIR/cellar_config.py" \
     "$INSTALL_DIR/cellar_config.py"
+/usr/bin/install -m 755 "$SOURCE_DIR/cellar_core.py" \
+    "$INSTALL_DIR/cellar_core.py"
+/usr/bin/install -m 755 "$SOURCE_DIR/cellar_ui.py" \
+    "$INSTALL_DIR/cellar_ui.py"
 /usr/bin/install -m 755 "$SOURCE_DIR/daily_report.py" \
     "$INSTALL_DIR/daily_report.py"
 /usr/bin/install -m 755 "$SOURCE_DIR/setup.sh" \
@@ -261,6 +271,13 @@ $INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_conf
 $INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_config.py show-sanitized
 $INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_config.py backup
 $INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_config.py restore *
+$INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_core.py summary
+$INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_core.py current
+$INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_core.py recent *
+$INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_core.py service *
+$INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_core.py logs *
+$INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_core.py config
+$INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_core.py sensor-scan
 $INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_logger.py --check-health-since *
 $INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_logger.py --show-status
 $INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/cellar_logger.py --show-latest
@@ -269,15 +286,6 @@ $INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python $INSTALL_DIR/daily_repor
 $INSTALL_USER ALL=(root) NOPASSWD: $VENV_DIR/bin/python -m pip install --requirement $INSTALL_DIR/requirements.txt
 $INSTALL_USER ALL=(root) NOPASSWD: $INSTALL_DIR/setup.sh
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/local/bin/cellar-update
-$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl start cellar-logger.service
-$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl stop cellar-logger.service
-$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart cellar-logger.service
-$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl status cellar-logger.service --no-pager
-$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl is-active cellar-logger.service
-$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl is-active --quiet cellar-logger.service
-$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl is-active cellar-report.timer
-$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/journalctl -u cellar-logger.service *
-$INSTALL_USER ALL=(root) NOPASSWD: /usr/sbin/i2cdetect -y 1
 EOF
 /usr/bin/chmod 440 "$SUDOERS_FILE"
 /usr/sbin/visudo -cf "$SUDOERS_FILE" >/dev/null ||

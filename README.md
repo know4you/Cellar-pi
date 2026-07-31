@@ -13,7 +13,7 @@ humidity, graphs, Discord reports, and a simple terminal interface.
 - Sends optional Discord reports every 12 or 24 hours
 - Matches each graph to the selected 12-hour or 24-hour report range
 - Keeps Discord failures isolated from the sensor logger
-- Provides the `/uc` User Control interface
+- Provides a full-screen, keyboard-first `/uc` User Control interface
 - Scans the I2C bus for connected SHT sensors from Troubleshooting
 - Safely changes sensor and notification settings
 - Validates configuration before applying it
@@ -71,6 +71,9 @@ After installation:
 Sensor logging is the core of Cellar-pi. Notifications, graphs, updates, and
 the user interface are optional layers. A failure in an optional layer must
 not stop environmental logging.
+
+The Raspberry Pi does not run a web UI. `/uc` is the local management layer,
+and the logger continues operating if that interface is closed or unavailable.
 
 ## Project status
 

@@ -12,6 +12,8 @@ RUNTIME_FILES = [
     "cellar-update",
     "cellar_logger.py",
     "cellar_config.py",
+    "cellar_core.py",
+    "cellar_ui.py",
     "daily_report.py",
     "requirements.txt",
 ]
@@ -23,15 +25,23 @@ class ReleaseContractTests(unittest.TestCase):
             self.assertNotIn(b"\r", (ROOT / name).read_bytes(), name)
 
     def test_user_control_top_level_menu_is_locked(self) -> None:
-        script = (ROOT / "cellarctl").read_text(encoding="utf-8")
-        expected = (
-            '"1" "Sensor" \\\n'
-            '        "2" "Notifications" \\\n'
-            '        "3" "System Status" \\\n'
-            '        "4" "Advanced / Troubleshooting" \\\n'
-            '        "0" "Exit"'
-        )
-        self.assertIn(expected, script)
+        script = (ROOT / "cellar_ui.py").read_text(encoding="utf-8")
+        for label in (
+            '"Sensor"',
+            '"Notifications"',
+            '"System Status"',
+            '"Advanced / Troubleshooting"',
+        ):
+            self.assertIn(label, script)
+        self.assertIn("curses.wrapper(main)", script)
+        self.assertIn("↑↓ Move", script)
+        self.assertIn("→/Enter Open", script)
+        self.assertIn("←/Esc Back", script)
+        self.assertNotIn('ord("w")', script)
+        self.assertNotIn('ord("s")', script)
+        self.assertNotIn('ord("a")', script)
+        self.assertNotIn('ord("d")', script)
+        self.assertNotIn("--gauge", script)
 
     def test_notification_code_does_not_import_or_control_logger(self) -> None:
         script = (ROOT / "daily_report.py").read_text(encoding="utf-8")
@@ -76,6 +86,16 @@ class ReleaseContractTests(unittest.TestCase):
             "restore *",
         ):
             self.assertIn(f"cellar_config.py {action}", script)
+        for action in (
+            "summary",
+            "current",
+            "recent *",
+            "service *",
+            "logs *",
+            "config",
+            "sensor-scan",
+        ):
+            self.assertIn(f"cellar_core.py {action}", script)
         self.assertIn(
             "cellar_logger.py --check-health-since *",
             script,
@@ -84,24 +104,34 @@ class ReleaseContractTests(unittest.TestCase):
             "pip install --requirement $INSTALL_DIR/requirements.txt",
             script,
         )
-        self.assertIn(
-            "$INSTALL_USER ALL=(root) NOPASSWD: "
-            "/usr/sbin/i2cdetect -y 1",
+        self.assertNotIn(
+            "NOPASSWD: /usr/bin/systemctl",
             script,
         )
 
     def test_troubleshooting_has_a_read_only_sensor_scan(self) -> None:
-        script = (ROOT / "cellarctl").read_text(encoding="utf-8")
-        self.assertIn('"5" "Scan Connected Sensors"', script)
-        self.assertIn('I2CDETECT="/usr/sbin/i2cdetect"', script)
-        self.assertIn('"$SUDO" "$I2CDETECT" -y 1', script)
-        self.assertIn("Configuration match: YES", script)
-        self.assertIn("Raw I2C scan:", script)
+        script = (ROOT / "cellar_ui.py").read_text(encoding="utf-8")
+        core = (ROOT / "cellar_core.py").read_text(encoding="utf-8")
+        self.assertIn('"Scan Connected Sensors"', script)
+        self.assertIn('I2CDETECT = "/usr/sbin/i2cdetect"', core)
+        self.assertIn("[I2CDETECT, \"-y\", \"1\"]", core)
+        self.assertIn("Raw I2C scan:", core)
+
+    def test_degree_words_are_not_user_facing(self) -> None:
+        for name in (
+            "setup.sh",
+            "cellar_logger.py",
+            "daily_report.py",
+            "cellar_ui.py",
+        ):
+            text = (ROOT / name).read_text(encoding="utf-8")
+            self.assertNotIn("deg F", text, name)
+            self.assertNotIn("deg C", text, name)
 
     def test_report_frequency_and_graph_window_move_together(self) -> None:
         config_script = (ROOT / "cellar_config.py").read_text(encoding="utf-8")
         report_script = (ROOT / "daily_report.py").read_text(encoding="utf-8")
-        control_script = (ROOT / "cellarctl").read_text(encoding="utf-8")
+        control_script = (ROOT / "cellar_ui.py").read_text(encoding="utf-8")
         self.assertIn("VALID_REPORT_FREQUENCIES = {12, 24}", config_script)
         self.assertIn("read_recent_data(window_hours)", report_script)
         self.assertIn(
@@ -109,14 +139,14 @@ class ReleaseContractTests(unittest.TestCase):
             report_script,
         )
         self.assertIn(
-            '"4" "Report Frequency and Graph Range"',
+            '"Frequency / Graph Range"',
             control_script,
         )
 
     def test_v1_runtime_uses_only_the_supported_sht_family(self) -> None:
         for name in (
             "setup.sh",
-            "cellarctl",
+            "cellar_ui.py",
             "cellar_logger.py",
             "requirements.txt",
         ):
@@ -132,7 +162,7 @@ class ReleaseContractTests(unittest.TestCase):
         )
 
         expected_sensors = ("SHT31", "SHT35", "SHT41", "SHT45")
-        for name in ("setup.sh", "cellarctl"):
+        for name in ("setup.sh", "cellar_ui.py"):
             text = (ROOT / name).read_text(encoding="utf-8")
             for sensor in expected_sensors:
                 self.assertIn(sensor, text, f"{sensor} missing from {name}")
@@ -140,3 +170,4 @@ class ReleaseContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

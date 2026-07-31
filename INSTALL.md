@@ -71,7 +71,12 @@ setup.sh
 
 ```bash
 bash -n install.sh setup.sh cellarctl cellar-update
-python3 -m py_compile cellar_logger.py cellar_config.py daily_report.py
+python3 -m py_compile \
+  cellar_logger.py \
+  cellar_config.py \
+  cellar_core.py \
+  cellar_ui.py \
+  daily_report.py
 ```
 
 No output is good. It means the files passed their basic syntax checks.
@@ -100,8 +105,10 @@ After installation finishes:
 /uc
 ```
 
-`/uc` stands for User Control. It lets you view readings, change the sensor,
-configure notifications, check system health, update Cellar-pi, and
+`/uc` stands for User Control. It opens a full-screen, keyboard-first terminal
+interface. Use the arrow keys to move, Enter or the right arrow to open,
+Esc or the left arrow to go back, and Q to quit. It lets you view readings, change the
+sensor, configure notifications, check system health, update Cellar-pi, and
 troubleshoot the logger.
 
 If a sensor is not showing up, choose:
@@ -137,3 +144,4 @@ monitor slowly turned into this.
 
 I genuinely hope someone enjoys using it. I have tried my hardest to make it
 simple enough that nearly anyone can get it running.
+

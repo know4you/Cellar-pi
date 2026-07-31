@@ -113,7 +113,7 @@ class LoggerFileTests(unittest.TestCase):
                 "healthy",
                 "SHT31",
                 0,
-                "70.7 deg F",
+                "70.7°F",
                 successful=True,
             )
         self.assertEqual(cellar_logger.health_check(100, "SHT31"), 0)
@@ -169,7 +169,7 @@ class LoggerFileTests(unittest.TestCase):
         with redirect_stdout(output):
             result = cellar_logger.show_latest_reading()
         self.assertEqual(result, 0)
-        self.assertIn("Temperature: 20.0 deg C", output.getvalue())
+        self.assertIn("Temperature: 20.0°C", output.getvalue())
         self.assertIn("Humidity: 55.0%", output.getvalue())
 
 
