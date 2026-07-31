@@ -213,7 +213,7 @@ class CellarUI:
 
         self.draw_details(panel_top + 1, left_width + 3, width - left_width - 6)
         self.screen.attron(curses.color_pair(1))
-        footer = " ↑↓ Move   →/Enter Open   ←/Esc Back   R Refresh   Q Quit "
+        footer = " ↑↓ Move   →/Enter Open   ←/Esc Back   G Send Graph   R Refresh   Q Quit "
         self.screen.addnstr(height - 2, 0, footer.ljust(width - 1), width - 1)
         self.screen.attroff(curses.color_pair(1))
         self.screen.addnstr(
@@ -301,6 +301,8 @@ class CellarUI:
                 self.footer_message = "Refreshing status..."
                 self.refresh_summary()
                 self.footer_message = "Status refreshed"
+            elif key in (ord("g"), ord("G")):
+                self.test_report()
             elif key in (ord("q"), ord("Q")):
                 return
 
@@ -626,6 +628,11 @@ class CellarUI:
         self.run_report_action("--test-notification", "Sending Discord test notification")
 
     def test_report(self) -> None:
+        if not self.confirm(
+            "Send Graph Now",
+            "Build and send the graph to Discord now?",
+        ):
+            return
         self.run_report_action("--test-report", "Building and sending report graph")
 
     def run_report_action(self, flag: str, detail: str) -> None:
