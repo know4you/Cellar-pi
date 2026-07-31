@@ -213,7 +213,7 @@ class CellarUI:
 
         self.draw_details(panel_top + 1, left_width + 3, width - left_width - 6)
         self.screen.attron(curses.color_pair(1))
-        footer = " ↑↓ Move   Enter Select   Esc Back   R Refresh   Q Quit "
+        footer = " ↑↓ Move   →/Enter Open   ←/Esc Back   R Refresh   Q Quit "
         self.screen.addnstr(height - 2, 0, footer.ljust(width - 1), width - 1)
         self.screen.attroff(curses.color_pair(1))
         self.screen.addnstr(
@@ -291,7 +291,11 @@ class CellarUI:
                     self.selected = 0
                 elif item.action is not None:
                     item.action()
-            elif key in (27, curses.KEY_LEFT, curses.KEY_BACKSPACE):
+            elif key in (
+                27,
+                curses.KEY_LEFT,
+                curses.KEY_BACKSPACE,
+            ):
                 self.go_back()
             elif key in (ord("r"), ord("R")):
                 self.footer_message = "Refreshing status..."
@@ -331,7 +335,15 @@ class CellarUI:
             )
             self.screen.refresh()
             key = self.screen.getch()
-            if key in (10, 13, 27, ord("q"), ord("Q")):
+            if key in (
+                10,
+                13,
+                27,
+                curses.KEY_LEFT,
+                curses.KEY_RIGHT,
+                ord("q"),
+                ord("Q"),
+            ):
                 return
             if key in (curses.KEY_DOWN, ord("j")):
                 offset = min(max(0, len(lines) - visible), offset + 1)
@@ -387,9 +399,9 @@ class CellarUI:
                 index = (index - 1) % len(choices)
             elif key in (curses.KEY_DOWN, ord("j")):
                 index = (index + 1) % len(choices)
-            elif key in (10, 13):
+            elif key in (10, 13, curses.KEY_RIGHT):
                 return choices[index][0]
-            elif key == 27:
+            elif key in (27, curses.KEY_LEFT):
                 return None
 
     def prompt(self, title: str, label: str, initial: str = "", secret: bool = False) -> str | None:
@@ -779,3 +791,4 @@ def main(screen) -> None:
 if __name__ == "__main__":
     os.environ.setdefault("ESCDELAY", "25")
     curses.wrapper(main)
+
