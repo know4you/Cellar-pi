@@ -37,6 +37,7 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn("↑↓ Move", script)
         self.assertIn("→/Enter Open", script)
         self.assertIn("←/Esc Back", script)
+        self.assertIn("G Send Graph", script)
         self.assertIn('"Send Graph Now"', script)
         self.assertNotIn('"Test Scheduled Report"', script)
         self.assertNotIn('ord("w")', script)
