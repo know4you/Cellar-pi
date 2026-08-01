@@ -77,15 +77,15 @@ and the logger continues operating if that interface is closed or unavailable.
 
 ## Project boundary
 
-This public repository is the open-source Raspberry Pi core. It contains the
-on-device sensor, logging, reporting, configuration, update, and local
+This public repository is the source-available Raspberry Pi core. It contains
+the on-device sensor, logging, reporting, configuration, update, and local
 management software.
 
 Centralized multi-device monitoring, remote dashboards, accounts, fleet
 management, hosted services, enterprise features, and commercial integrations
 belong to **Cellar Monitoring Server (CMS)**, a separate private and proprietary
 repository. CMS may integrate with this project through documented interfaces,
-but CMS source code is not covered by this repository's MIT License.
+but CMS source code is not covered by this repository's license.
 
 No CMS code has been moved out of this repository because no clearly separable
 server, cloud, or web-dashboard implementation is currently present here.
@@ -104,4 +104,19 @@ this project.
 
 ## License
 
-Cellar-pi is available under the [MIT License](LICENSE).
+The current version of Cellar-pi is available under the
+[PolyForm Noncommercial License 1.0.0](LICENSE).
+
+Personal, home, hobby, and other noncommercial uses permitted by that license
+are free. Commercial use—including resale, paid bundling, or installing
+Cellar-pi as part of a product or service—requires a separate written
+commercial license. See [Commercial Licensing](COMMERCIAL-LICENSING.md).
+
+This is a source-available license, not an OSI-approved open-source license,
+because it restricts commercial use.
+
+Versions through commit
+[`4d1f4787`](https://github.com/know4you/Cellar-pi/commit/4d1f4787fd2af3ae95ca866b439aefff445b5fe0)
+were released under the MIT License and remain available under those terms.
+The current version and future versions are offered under the license in this
+repository's `LICENSE` file.
