@@ -75,6 +75,21 @@ not stop environmental logging.
 The Raspberry Pi does not run a web UI. `/uc` is the local management layer,
 and the logger continues operating if that interface is closed or unavailable.
 
+## Project boundary
+
+This public repository is the open-source Raspberry Pi core. It contains the
+on-device sensor, logging, reporting, configuration, update, and local
+management software.
+
+Centralized multi-device monitoring, remote dashboards, accounts, fleet
+management, hosted services, enterprise features, and commercial integrations
+belong to **Cellar Monitoring Server (CMS)**, a separate private and proprietary
+repository. CMS may integrate with this project through documented interfaces,
+but CMS source code is not covered by this repository's MIT License.
+
+No CMS code has been moved out of this repository because no clearly separable
+server, cloud, or web-dashboard implementation is currently present here.
+
 ## Project status
 
 Cellar-pi is in early development. Back up important data and test your sensor
